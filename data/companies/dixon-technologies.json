@@ -1,0 +1,116 @@
+{
+  "target_company": "Dixon Technologies (India) Limited",
+  "rating": "[ICRA]AA (Stable)/[ICRA]A1+",
+  "report_date": "2026-01-06",
+  "agency": "ICRA",
+  "verified": true,
+  "nodes": [
+    { "id": "dixon-technologies", "label": "Dixon Technologies (India) Limited", "type": "target" },
+    { "id": "unnamed-suppliers", "label": "Unnamed suppliers · supplier-credit funded", "type": "unnamed_dependency", "named": false },
+    { "id": "motorola-mobility-llc", "label": "Motorola Mobility LLC", "type": "customer" },
+    { "id": "ismartu-group", "label": "Ismartu Group", "type": "customer" },
+    { "id": "longcheer", "label": "Longcheer", "type": "customer" },
+    { "id": "bharti-airtel", "label": "Bharti Airtel Limited", "type": "customer" },
+    { "id": "xiaomi-corporation", "label": "Xiaomi Corporation", "type": "customer" },
+    { "id": "samsung-electronics", "label": "Samsung Electronics", "type": "customer" },
+    { "id": "padget-electronics", "label": "Padget Electronics Private Limited (PEPL)", "type": "subsidiary" },
+    { "id": "dixon-electro-manufacturing", "label": "Dixon Electro Manufacturing Private Limited", "type": "subsidiary" }
+  ],
+  "edges": [
+    {
+      "source": "unnamed-suppliers",
+      "target": "dixon-technologies",
+      "relation": "Supplier credit funds working capital",
+      "exposure_pct": null,
+      "risk_flag": "medium",
+      "source_quote": "DTIL’s operations entail sizeable working capital requirements due to import lead time and receivables realisation period, largely funded through supplier credit, resulting in a relatively high TOL/TNW ratio and dependence on sizeable non-fund based limits.",
+      "source_page": 1,
+      "confidence": "high"
+    },
+    {
+      "source": "dixon-technologies",
+      "target": "motorola-mobility-llc",
+      "relation": "Top-three customer",
+      "exposure_pct": null,
+      "risk_flag": "high",
+      "source_quote": "A major part of its revenues and operating profitability is derived from its top three customers — Motorola, Ismartu and Longcheer.",
+      "source_page": 3,
+      "confidence": "high"
+    },
+    {
+      "source": "dixon-technologies",
+      "target": "ismartu-group",
+      "relation": "Top-three customer",
+      "exposure_pct": null,
+      "risk_flag": "high",
+      "source_quote": "A major part of its revenues and operating profitability is derived from its top three customers — Motorola, Ismartu and Longcheer.",
+      "source_page": 3,
+      "confidence": "high"
+    },
+    {
+      "source": "dixon-technologies",
+      "target": "longcheer",
+      "relation": "Top-three customer",
+      "exposure_pct": null,
+      "risk_flag": "high",
+      "source_quote": "A major part of its revenues and operating profitability is derived from its top three customers — Motorola, Ismartu and Longcheer.",
+      "source_page": 3,
+      "confidence": "high"
+    },
+    {
+      "source": "dixon-technologies",
+      "target": "bharti-airtel",
+      "relation": "Largest client",
+      "exposure_pct": null,
+      "risk_flag": "medium",
+      "source_quote": "However, this risk is partly mitigated by the strong profiles of its largest clients – Motorola Mobility LLC, Ismartu Group, Longcheer, Bharti Airtel Limited, Xiaomi Corporation (Moody’s Baa1, Stable), and Samsung Electronics (Moody’s Aa2, Negative) – and by DTIL's growing customer base and status as a leading, cost-efficient EMS provider in India.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "dixon-technologies",
+      "target": "xiaomi-corporation",
+      "relation": "Largest client",
+      "exposure_pct": null,
+      "risk_flag": "medium",
+      "source_quote": "However, this risk is partly mitigated by the strong profiles of its largest clients – Motorola Mobility LLC, Ismartu Group, Longcheer, Bharti Airtel Limited, Xiaomi Corporation (Moody’s Baa1, Stable), and Samsung Electronics (Moody’s Aa2, Negative) – and by DTIL's growing customer base and status as a leading, cost-efficient EMS provider in India.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "dixon-technologies",
+      "target": "samsung-electronics",
+      "relation": "Largest client",
+      "exposure_pct": null,
+      "risk_flag": "medium",
+      "source_quote": "However, this risk is partly mitigated by the strong profiles of its largest clients – Motorola Mobility LLC, Ismartu Group, Longcheer, Bharti Airtel Limited, Xiaomi Corporation (Moody’s Baa1, Stable), and Samsung Electronics (Moody’s Aa2, Negative) – and by DTIL's growing customer base and status as a leading, cost-efficient EMS provider in India.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "dixon-technologies",
+      "target": "padget-electronics",
+      "relation": "Wholly-owned subsidiary · mobiles & IT hardware",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "While the LED television and home appliance business are catered to by DTIL, mobile phones and IT hardware manufacturing come under its wholly-owned subsidiary, Padget Electronics Private Limited (PEPL).",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "dixon-technologies",
+      "target": "dixon-electro-manufacturing",
+      "relation": "Wholly-owned subsidiary · refrigerators",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "Similarly, the refrigerator business is undertaken through its wholly-owned subsidiary - Dixon Electro Manufacturing Private Limited.",
+      "source_page": 2,
+      "confidence": "high"
+    }
+  ],
+  "key_risks": [
+    "A major part of revenue and operating profitability comes from Motorola, Ismartu and Longcheer.",
+    "Dependence on imported components exposes operations to geopolitical and import-disruption risk.",
+    "Working capital is largely funded by unnamed supplier credit, creating dependence on substantial non-fund-based limits."
+  ]
+}

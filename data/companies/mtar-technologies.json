@@ -1,0 +1,84 @@
+{
+  "target_company": "MTAR Technologies Limited",
+  "rating": "[ICRA]A+ (Stable)",
+  "report_date": "2026-07-07",
+  "agency": "ICRA",
+  "verified": true,
+  "nodes": [
+    { "id": "mtar-technologies", "label": "MTAR Technologies Limited", "type": "target" },
+    { "id": "unnamed-import-suppliers", "label": "Unnamed import suppliers · 30–120-day credit", "type": "unnamed_dependency", "named": false },
+    { "id": "bloom-energy-corporation", "label": "Bloom Energy Corporation (BEC)", "type": "customer" },
+    { "id": "isro", "label": "Indian Space Research Organisation (ISRO)", "type": "customer" },
+    { "id": "npcil", "label": "Nuclear Power Corporation of India (NPCIL)", "type": "customer" },
+    { "id": "drdl", "label": "Defence Research and Development Laboratory (DRDL)", "type": "customer" },
+    { "id": "gee-pee-aerospace", "label": "Gee-Pee Aerospace", "type": "subsidiary" }
+  ],
+  "edges": [
+    {
+      "source": "unnamed-import-suppliers",
+      "target": "mtar-technologies",
+      "relation": "Provides 30–120-day import credit",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "The company extends a credit period of up to 30-120 days to its customers and receives a credit period of 30-120 days from its import suppliers (majority of the period is in transit time).",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "mtar-technologies",
+      "target": "bloom-energy-corporation",
+      "relation": "Single customer · >70% of revenue",
+      "exposure_pct": 70,
+      "risk_flag": "high",
+      "source_quote": "The company faces high customer concentration, with more than 70% of its revenues being generated from a single customer, BEC, in FY2026.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "mtar-technologies",
+      "target": "isro",
+      "relation": "Renowned client",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "The company has a renowned client base, including reputed players such as BEC, ISRO, NPCIL and DRDL, among others.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "mtar-technologies",
+      "target": "npcil",
+      "relation": "Renowned client",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "The company has a renowned client base, including reputed players such as BEC, ISRO, NPCIL and DRDL, among others.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "mtar-technologies",
+      "target": "drdl",
+      "relation": "Renowned client",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "The company has a renowned client base, including reputed players such as BEC, ISRO, NPCIL and DRDL, among others.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "mtar-technologies",
+      "target": "gee-pee-aerospace",
+      "relation": "Wholly-owned subsidiary",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "MTL has received NADCAP certification for its facilities at Units 5, 7, and Gee-Pee Aerospace (a wholly-owned subsidiary).",
+      "source_page": 4,
+      "confidence": "high"
+    }
+  ],
+  "key_risks": [
+    "More than 70% of FY2026 revenue came from BEC, creating high customer concentration risk.",
+    "Unnamed import suppliers provide 30–120-day credit, creating a working-capital dependency.",
+    "Long production and receivable cycles make operations working-capital intensive.",
+    "Margins are exposed to foreign-exchange movements because MTAR is a net exporter."
+  ]
+}

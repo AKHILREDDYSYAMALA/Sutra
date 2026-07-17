@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  background: #07101f;
+}
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.sutra-flow .react-flow__edge {
+  cursor: pointer;
+}
+
+.sutra-flow .react-flow__edge:hover .react-flow__edge-path {
+  filter: brightness(1.4);
+}
+
+.sutra-flow .react-flow__edge-text {
+  pointer-events: none;
+}
+
+.react-flow__attribution {
+  display: none;
+}

@@ -1,0 +1,7 @@
+# Dependencies and Next.js build output
+node_modules/
+.next/
+
+# Local secrets. Keep the safe template under version control.
+.env*
+!.env.example

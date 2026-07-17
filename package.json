@@ -1,0 +1,36 @@
+{
+  "name": "sutra",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "static:check": "node scripts/check-static-graphs.mjs",
+    "corpus:index": "node scripts/build-corpus-index.mjs",
+    "predev": "npm run static:check && npm run corpus:index",
+    "dev": "next dev",
+    "prebuild": "npm run static:check && npm run corpus:index",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "@xyflow/react": "^12.7.1",
+    "next": "^15.3.3",
+    "openai": "^4.104.0",
+    "pdf-parse": "^1.1.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.21",
+    "eslint": "^9.26.0",
+    "eslint-config-next": "^15.3.3",
+    "postcss": "^8.5.3",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.3"
+  }
+}

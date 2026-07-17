@@ -1,0 +1,116 @@
+{
+  "target_company": "Amber Enterprises India Limited",
+  "rating": "[ICRA]AA- (Stable)/[ICRA]A1+",
+  "report_date": "2025-12-15",
+  "agency": "ICRA",
+  "verified": true,
+  "nodes": [
+    { "id": "amber-enterprises", "label": "Amber Enterprises India Limited", "type": "target" },
+    { "id": "unnamed-import-suppliers", "label": "Unnamed import suppliers · 25–30% of purchases", "type": "unnamed_dependency", "named": false },
+    { "id": "voltas", "label": "Voltas", "type": "customer" },
+    { "id": "lg", "label": "LG", "type": "customer" },
+    { "id": "samsung", "label": "Samsung", "type": "customer" },
+    { "id": "toshiba", "label": "Toshiba", "type": "customer" },
+    { "id": "blue-star", "label": "Blue Star", "type": "customer" },
+    { "id": "indian-railways", "label": "Indian Railways", "type": "customer" },
+    { "id": "iljin-electronics", "label": "ILJIN Electronics (India) Private Limited (ILJIN)", "type": "subsidiary" },
+    { "id": "sidwal-refrigeration", "label": "Sidwal Refrigeration", "type": "subsidiary" }
+  ],
+  "edges": [
+    {
+      "source": "unnamed-import-suppliers",
+      "target": "amber-enterprises",
+      "relation": "Imported inputs · 25–30% of purchases",
+      "exposure_pct": null,
+      "risk_flag": "medium",
+      "source_quote": "Exposure to forex fluctuation risks and raw material volatility to an extent – AEIL’s profitability remains exposed to fluctuations in foreign currencies as 25-30% of the total purchases are made through imports.",
+      "source_page": 3,
+      "confidence": "high"
+    },
+    {
+      "source": "amber-enterprises",
+      "target": "voltas",
+      "relation": "RAC client · medium-to-high business share",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "AEIL serves a strong and a reputed clientele in the RAC industry, including brands like Voltas, LG, Samsung, Toshiba and Blue Star.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "amber-enterprises",
+      "target": "lg",
+      "relation": "RAC client · medium-to-high business share",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "AEIL serves a strong and a reputed clientele in the RAC industry, including brands like Voltas, LG, Samsung, Toshiba and Blue Star.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "amber-enterprises",
+      "target": "samsung",
+      "relation": "RAC client · medium-to-high business share",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "AEIL serves a strong and a reputed clientele in the RAC industry, including brands like Voltas, LG, Samsung, Toshiba and Blue Star.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "amber-enterprises",
+      "target": "toshiba",
+      "relation": "RAC client · medium-to-high business share",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "AEIL serves a strong and a reputed clientele in the RAC industry, including brands like Voltas, LG, Samsung, Toshiba and Blue Star.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "amber-enterprises",
+      "target": "blue-star",
+      "relation": "RAC client · medium-to-high business share",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "AEIL serves a strong and a reputed clientele in the RAC industry, including brands like Voltas, LG, Samsung, Toshiba and Blue Star.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "amber-enterprises",
+      "target": "indian-railways",
+      "relation": "Largest supplier of roof-mounted package AC units",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "Additionally, it holds a dominant position in the mobility application segment and is the largest supplier of roof-mounted package unit air conditioners to the Indian Railways.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "amber-enterprises",
+      "target": "iljin-electronics",
+      "relation": "Subsidiary · electronics acquisitions",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "Additionally, performance of the electronics division is also expected to remain healthy, supported by the recent acquisitions of Power-One Micro Systems Private Limited (Power-One) and Unitronics (1989) (R\"G) Ltd (Unitronics) by AEIL’s subsidiary - ILJIN Electronics (India) Private Limited (ILJIN).",
+      "source_page": 1,
+      "confidence": "high"
+    },
+    {
+      "source": "amber-enterprises",
+      "target": "sidwal-refrigeration",
+      "relation": "Subsidiary · mobility applications",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "In the mobility applications segment, AEIL supplies Indian Railways and major metro coach manufacturers through its subsidiary, Sidwal Refrigeration.",
+      "source_page": 3,
+      "confidence": "high"
+    }
+  ],
+  "key_risks": [
+    "Seasonal RAC demand can cause revenue, profitability and working-capital fluctuations.",
+    "High dependence on imported raw materials and components exposes AEIL to foreign-exchange, import-dependency and price volatility.",
+    "Electronics capex and acquisitions could pressure returns until scale and integration benefits materialise."
+  ]
+}
