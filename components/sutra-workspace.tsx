@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CompanyList } from "@/components/company-picker";
+import { DependencyReadCard } from "@/components/dependency-read";
 import { RelationshipGraph } from "@/components/relationship-graph";
 import { staticSandboxCompanies, type SandboxCompany } from "@/lib/company-data";
 import {
@@ -13,8 +14,8 @@ import {
   graphReportIdentity,
   type CorpusRelationship,
 } from "@/lib/corpus";
+import { getDependencyRead, type DependencyReadLine } from "@/lib/dependency-read";
 import { analysisResponseSchema, graphDataSchema, type AnalysisMeta, type GraphData, type GraphEdge, type GraphNode } from "@/lib/graph-data";
-import { getRiskVerdict } from "@/lib/risk-summary";
 
 const initialCompanyId = "mtar-technologies";
 const isDevelopment = process.env.NODE_ENV === "development";
@@ -32,19 +33,19 @@ export function SutraWorkspace() {
   const [graph, setGraph] = useState<GraphData>(() => staticSandboxCompanies.find((company) => company.id === initialCompanyId)!.graph);
   const [sandboxCompanies, setSandboxCompanies] = useState<SandboxCompany[]>(staticSandboxCompanies);
   const [sessionGraphs, setSessionGraphs] = useState<GraphData[]>([]);
-  const [selectedEdge, setSelectedEdge] = useState<GraphEdge | null>(null);
+  const [selectedEvidenceEdges, setSelectedEvidenceEdges] = useState<GraphEdge[]>([]);
   const [selectedEntityNode, setSelectedEntityNode] = useState<GraphNode | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalysing, setIsAnalysing] = useState(false);
   const [isSavingToSandbox, setIsSavingToSandbox] = useState(false);
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
-  const [isRiskPanelOpen, setIsRiskPanelOpen] = useState(false);
-  const [isExclusionsOpen, setIsExclusionsOpen] = useState(false);
+  const [isRiskPanelOpen, setIsRiskPanelOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sandboxMessage, setSandboxMessage] = useState<string | null>(null);
   const [analysisMeta, setAnalysisMeta] = useState<AnalysisMeta>(emptyAnalysisMeta);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const riskVerdict = getRiskVerdict(graph);
+  const selectedEdge = selectedEvidenceEdges[0] ?? null;
+  const dependencyRead = useMemo(() => getDependencyRead(graph, companyId === null ? analysisMeta : undefined), [analysisMeta, companyId, graph]);
   const isWorkspacePanelOpen = isLeftPanelOpen || companyId === null;
   const selectedCompanyName = sandboxCompanies.find((company) => company.id === companyId)?.name ?? graph.target_company;
   const selectedCorpusEntity = useMemo(() => (selectedEntityNode ? getCorpusEntity(selectedEntityNode.label) : null), [selectedEntityNode]);
@@ -129,14 +130,23 @@ export function SutraWorkspace() {
     }
   }, [sessionGraphs]);
 
+  function closeEvidence() {
+    setSelectedEvidenceEdges([]);
+  }
+
+  function openEvidence(edges: GraphEdge[]) {
+    if (edges.length === 0) return;
+    setSelectedEntityNode(null);
+    setSelectedEvidenceEdges(edges);
+  }
+
   function loadCompany(id: string) {
     const company = sandboxCompanies.find((entry) => entry.id === id);
     if (!company) return;
     setCompanyId(id);
     setGraph(company.graph);
     setAnalysisMeta(emptyAnalysisMeta);
-    setIsExclusionsOpen(false);
-    setSelectedEdge(null);
+    closeEvidence();
     setSelectedEntityNode(null);
     setError(null);
   }
@@ -154,7 +164,7 @@ export function SutraWorkspace() {
     setError(null);
     setSandboxMessage(null);
     setIsAnalysing(true);
-    setSelectedEdge(null);
+    closeEvidence();
     setSelectedEntityNode(null);
 
     try {
@@ -173,7 +183,6 @@ export function SutraWorkspace() {
 
       setGraph(parsedResponse.data.graph);
       setAnalysisMeta(parsedResponse.data.meta);
-      setIsExclusionsOpen(false);
       setSessionGraphs((currentGraphs) => {
         const nextGraphs = currentGraphs.filter((currentGraph) => graphReportIdentity(currentGraph) !== graphReportIdentity(parsedResponse.data.graph));
         return [...nextGraphs, parsedResponse.data.graph];
@@ -223,15 +232,13 @@ export function SutraWorkspace() {
     <main className="relative h-[100dvh] min-h-[680px] overflow-hidden bg-[#07101f] text-slate-100">
       <RelationshipGraph
         graph={graph}
-        onSelectEdge={(edge) => {
-          setSelectedEntityNode(null);
-          setSelectedEdge(edge);
-        }}
+        onSelectEdge={(edge) => openEvidence([edge])}
         onSelectNode={(node) => {
-          setSelectedEdge(null);
+          closeEvidence();
           setSelectedEntityNode(node);
         }}
         panelState={panelState}
+        highlightedEdges={selectedEvidenceEdges}
       />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(8,145,178,0.08),transparent_38%),linear-gradient(180deg,rgba(2,6,23,0.2),rgba(2,6,23,0.45))]" />
 
@@ -365,67 +372,23 @@ export function SutraWorkspace() {
 
       <div className="absolute right-5 top-28 z-10 hidden w-[340px] lg:block">
         {isRiskPanelOpen ? (
-          <aside className="rounded-2xl border border-rose-300/20 bg-slate-950/90 p-4 shadow-2xl shadow-black/30 backdrop-blur-xl transition-opacity duration-300">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-rose-200">
-                <span className="h-1.5 w-1.5 rounded-full bg-rose-300" /> Risk verdict
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsRiskPanelOpen(false)}
-                className="grid h-6 w-6 place-items-center rounded-md text-slate-400 transition hover:bg-white/10 hover:text-white"
-                aria-label="Collapse key risks"
-              >
-                ×
-              </button>
-            </div>
-            <p className="mt-2 text-sm font-semibold leading-snug text-slate-100">{riskVerdict.label}</p>
-            <div className="my-3 h-px bg-white/10" />
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">Key risks in report</p>
-            <ul className="space-y-2.5">
-              {graph.key_risks.map((risk, index) => (
-                <li key={`${risk}-${index}`} className="flex gap-2 text-xs leading-relaxed text-slate-300">
-                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-rose-300" />
-                  {risk}
-                </li>
-              ))}
-            </ul>
-            {analysisMeta.excluded.length > 0 && (
-              <div className="mt-4 border-t border-white/10 pt-3">
-                <button
-                  type="button"
-                  onClick={() => setIsExclusionsOpen((open) => !open)}
-                  className="flex w-full items-start justify-between gap-3 rounded-lg border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-left transition hover:bg-amber-300/10"
-                  aria-expanded={isExclusionsOpen}
-                  aria-label="Toggle excluded relationships"
-                >
-                  <span className="text-[11px] leading-relaxed text-amber-100">
-                    {analysisMeta.excluded.length} reported relationship{analysisMeta.excluded.length === 1 ? "" : "s"} excluded because their evidence could not be verified verbatim.
-                  </span>
-                  <span className="shrink-0 text-sm text-amber-200">{isExclusionsOpen ? "⌃" : "⌄"}</span>
-                </button>
-                {isExclusionsOpen && (
-                  <ul className="mt-2 space-y-1.5 px-2 text-[11px] text-slate-300">
-                    {analysisMeta.excluded.map((item) => (
-                      <li key={`${item.reason}-${item.label}`} className="flex gap-2">
-                        <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-300" />
-                        {item.label}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-          </aside>
+          <DependencyReadCard
+            read={dependencyRead}
+            onCollapse={() => setIsRiskPanelOpen(false)}
+            onSelectLine={(line: DependencyReadLine) => openEvidence(line.edges)}
+          />
         ) : (
           <button
             type="button"
             onClick={() => setIsRiskPanelOpen(true)}
-            className="flex w-full items-center justify-between gap-3 rounded-full border border-rose-300/20 bg-slate-950/85 px-4 py-3 text-left shadow-xl shadow-black/25 backdrop-blur-xl transition hover:border-rose-300/45 hover:bg-slate-900"
-            aria-label="Expand key risks"
+            className={`flex w-full items-center justify-between gap-3 rounded-full border bg-slate-950/85 px-4 py-3 text-left shadow-xl shadow-black/25 backdrop-blur-xl transition hover:bg-slate-900 ${dependencyRead.tone === "high" ? "border-rose-300/20 hover:border-rose-300/45" : dependencyRead.tone === "medium" ? "border-amber-300/20 hover:border-amber-300/45" : "border-emerald-300/20 hover:border-emerald-300/45"}`}
+            aria-label="Expand dependency read"
           >
-            <span className="min-w-0 truncate text-xs font-semibold text-slate-100">{riskVerdict.label}</span>
-            <span className="shrink-0 text-base leading-none text-rose-200">›</span>
+            <span className="flex min-w-0 items-center gap-2">
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dependencyRead.tone === "high" ? "bg-rose-300" : dependencyRead.tone === "medium" ? "bg-amber-300" : "bg-emerald-300"}`} />
+              <span className="min-w-0 truncate text-xs font-semibold text-slate-100">{dependencyRead.headline}</span>
+            </span>
+            <span className="shrink-0 text-base leading-none text-cyan-200">›</span>
           </button>
         )}
       </div>
@@ -494,34 +457,43 @@ export function SutraWorkspace() {
       )}
 
       {selectedEdge && (
-        <aside className="absolute bottom-5 right-4 z-20 w-[min(390px,calc(100vw-2rem))] rounded-2xl border border-cyan-300/20 bg-slate-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl sm:right-5">
+        <aside className="absolute bottom-5 right-4 z-20 flex max-h-[calc(100dvh-6rem)] w-[min(390px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-cyan-300/20 bg-slate-950/95 p-4 shadow-2xl shadow-black/50 backdrop-blur-xl sm:right-5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200">Source evidence</p>
-              <p className="mt-1 text-sm font-semibold leading-snug text-slate-100">{selectedEdge.relation}</p>
+              <p className="mt-1 text-sm font-semibold leading-snug text-slate-100">
+                {selectedEvidenceEdges.length === 1 ? selectedEdge.relation : `${selectedEvidenceEdges.length} report excerpts support this read`}
+              </p>
             </div>
             <button
               type="button"
-              onClick={() => setSelectedEdge(null)}
+              onClick={closeEvidence}
               className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-white/10 hover:text-white"
               aria-label="Close source evidence"
             >
               ×
             </button>
           </div>
-          <blockquote className="mt-4 border-l-2 border-cyan-300/70 bg-cyan-300/5 px-3 py-2.5 font-serif text-sm leading-relaxed text-slate-200">
-            “{selectedEdge.source_quote}”
-          </blockquote>
-          <div className="mt-3 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.13em] text-slate-500">
-            <span>{selectedEdge.source_page ? `Page ${selectedEdge.source_page}` : "Page unavailable"}</span>
-            <span className="text-slate-700">•</span>
-            <span>{selectedEdge.confidence} confidence</span>
-            {selectedEdge.risk_flag && (
-              <>
-                <span className="text-slate-700">•</span>
-                <span className={selectedEdge.risk_flag === "high" ? "text-rose-300" : "text-amber-200"}>{edgeRiskLabel[selectedEdge.risk_flag]}</span>
-              </>
-            )}
+          <div className="mt-4 space-y-4 overflow-y-auto pr-1">
+            {selectedEvidenceEdges.map((edge, index) => (
+              <div key={`${edge.source}-${edge.target}-${edge.relation}-${index}`} className={index > 0 ? "border-t border-white/10 pt-4" : ""}>
+                {selectedEvidenceEdges.length > 1 && <p className="mb-2 text-xs font-semibold leading-snug text-slate-100">{edge.relation}</p>}
+                <blockquote className="border-l-2 border-cyan-300/70 bg-cyan-300/5 px-3 py-2.5 font-serif text-sm leading-relaxed text-slate-200">
+                  “{edge.source_quote}”
+                </blockquote>
+                <div className="mt-3 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.13em] text-slate-500">
+                  <span>{edge.source_page ? `Page ${edge.source_page}` : "Page unavailable"}</span>
+                  <span className="text-slate-700">•</span>
+                  <span>{edge.confidence} confidence</span>
+                  {edge.risk_flag && (
+                    <>
+                      <span className="text-slate-700">•</span>
+                      <span className={edge.risk_flag === "high" ? "text-rose-300" : "text-amber-200"}>{edgeRiskLabel[edge.risk_flag]}</span>
+                    </>
+                  )}
+                </div>
+              </div>
+            ))}
           </div>
         </aside>
       )}

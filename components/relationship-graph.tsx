@@ -24,6 +24,7 @@ type SutraNodeData = {
   entityType: GraphNode["type"];
   named: boolean;
   reportCount: number;
+  highlighted: boolean;
 };
 type SutraFlowNode = Node<SutraNodeData, "sutra">;
 type SutraFlowEdge = Edge<{ evidence: GraphEdge }>;
@@ -58,6 +59,8 @@ function SutraNode({ data }: NodeProps<SutraFlowNode>) {
         title={data.reportCount > 1 ? `Appears in ${data.reportCount} Sutra reports. Click to explore.` : "Click to explore this entity in Sutra's corpus."}
         className={`min-h-[96px] min-w-[188px] max-w-[230px] cursor-pointer rounded-xl border px-3.5 py-3 shadow-xl shadow-slate-950/50 backdrop-blur transition hover:-translate-y-0.5 hover:brightness-125 ${
           isUnnamed ? "border-dashed border-slate-400/55 bg-slate-400/5" : theme.accent
+        } ${
+          data.highlighted ? "ring-2 ring-cyan-300/80 ring-offset-2 ring-offset-slate-950" : ""
         }`}
       >
         <div className="mb-1.5 flex items-start justify-between gap-2">
@@ -131,7 +134,7 @@ function layoutNodes(graph: GraphData) {
   );
 }
 
-function toFlowNodes(graph: GraphData): SutraFlowNode[] {
+function toFlowNodes(graph: GraphData, highlightedNodeIds: Set<string>): SutraFlowNode[] {
   const positions = layoutNodes(graph);
 
   return orderedNodes(graph).map((node) => ({
@@ -143,15 +146,21 @@ function toFlowNodes(graph: GraphData): SutraFlowNode[] {
       entityType: node.type,
       named: node.named,
       reportCount: getCorpusReportCount(node.label),
+      highlighted: highlightedNodeIds.has(node.id),
     },
   }));
 }
 
-function toFlowEdges(graph: GraphData): SutraFlowEdge[] {
+function edgeIdentity(edge: GraphEdge) {
+  return `${edge.source}\u0000${edge.target}\u0000${edge.relation}\u0000${edge.source_quote}`;
+}
+
+function toFlowEdges(graph: GraphData, highlightedEdgeIds: Set<string>): SutraFlowEdge[] {
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
   return graph.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)).map((edge, index) => {
     const isHighRisk = edge.risk_flag === "high";
     const isMediumRisk = edge.risk_flag === "medium";
+    const highlighted = highlightedEdgeIds.has(edgeIdentity(edge));
     return {
       id: `${edge.source}-${edge.target}-${index}`,
       source: edge.source,
@@ -159,11 +168,11 @@ function toFlowEdges(graph: GraphData): SutraFlowEdge[] {
       label: edge.relation,
       data: { evidence: edge },
       type: "smoothstep",
-      animated: isHighRisk,
-      markerEnd: { type: MarkerType.ArrowClosed, color: isHighRisk ? "#fb7185" : isMediumRisk ? "#fbbf24" : "#64748b" },
+      animated: isHighRisk || highlighted,
+      markerEnd: { type: MarkerType.ArrowClosed, color: highlighted ? "#67e8f9" : isHighRisk ? "#fb7185" : isMediumRisk ? "#fbbf24" : "#64748b" },
       style: {
-        stroke: isHighRisk ? "#fb7185" : isMediumRisk ? "#fbbf24" : "#64748b",
-        strokeWidth: isHighRisk ? 3.5 : 1.7,
+        stroke: highlighted ? "#67e8f9" : isHighRisk ? "#fb7185" : isMediumRisk ? "#fbbf24" : "#64748b",
+        strokeWidth: highlighted ? 4.5 : isHighRisk ? 3.5 : 1.7,
       },
       labelStyle: { fill: isHighRisk ? "#fecdd3" : "#cbd5e1", fontSize: 10, fontWeight: 600 },
       labelBgStyle: { fill: "#0f172a", fillOpacity: 0.96 },
@@ -178,6 +187,7 @@ type RelationshipGraphProps = {
   onSelectEdge: (edge: GraphEdge) => void;
   onSelectNode: (node: GraphNode) => void;
   panelState: GraphPanelState;
+  highlightedEdges?: GraphEdge[];
 };
 
 function getSafeInsets(panelState: GraphPanelState) {
@@ -247,9 +257,11 @@ function PanelAwareViewport({ graphKey, panelState }: { graphKey: string; panelS
   return null;
 }
 
-export function RelationshipGraph({ graph, onSelectEdge, onSelectNode, panelState }: RelationshipGraphProps) {
-  const nodes = useMemo(() => toFlowNodes(graph), [graph]);
-  const edges = useMemo(() => toFlowEdges(graph), [graph]);
+export function RelationshipGraph({ graph, onSelectEdge, onSelectNode, panelState, highlightedEdges = [] }: RelationshipGraphProps) {
+  const highlightedEdgeIds = useMemo(() => new Set(highlightedEdges.map(edgeIdentity)), [highlightedEdges]);
+  const highlightedNodeIds = useMemo(() => new Set(highlightedEdges.flatMap((edge) => [edge.source, edge.target])), [highlightedEdges]);
+  const nodes = useMemo(() => toFlowNodes(graph, highlightedNodeIds), [graph, highlightedNodeIds]);
+  const edges = useMemo(() => toFlowEdges(graph, highlightedEdgeIds), [graph, highlightedEdgeIds]);
   const sourceNodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
 
   const handleEdgeClick = useCallback(
