@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CompanyPicker } from "@/components/company-picker";
+import { CompanyList } from "@/components/company-picker";
 import { RelationshipGraph } from "@/components/relationship-graph";
 import { staticSandboxCompanies, type SandboxCompany } from "@/lib/company-data";
 import {
@@ -37,7 +37,7 @@ export function SutraWorkspace() {
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalysing, setIsAnalysing] = useState(false);
   const [isSavingToSandbox, setIsSavingToSandbox] = useState(false);
-  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(false);
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
   const [isRiskPanelOpen, setIsRiskPanelOpen] = useState(false);
   const [isExclusionsOpen, setIsExclusionsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,7 +139,6 @@ export function SutraWorkspace() {
     setSelectedEdge(null);
     setSelectedEntityNode(null);
     setError(null);
-    setIsLeftPanelOpen(false);
   }
 
   async function analysePdf(file: File) {
@@ -250,69 +249,76 @@ export function SutraWorkspace() {
       </header>
 
       <section
-        className={`absolute top-20 z-10 overflow-hidden rounded-2xl border border-white/10 bg-slate-950/85 shadow-2xl shadow-black/30 backdrop-blur-xl transition-[width,height,padding] duration-300 ease-out ${isWorkspacePanelOpen ? "left-3 right-3 p-4 sm:left-6 sm:right-auto sm:w-[365px] sm:p-5" : "left-3 h-11 w-[min(calc(100vw-1.5rem),340px)] p-1 sm:left-6 sm:w-[320px]"}`}
+        className={`absolute top-28 z-10 rounded-2xl border border-white/10 bg-slate-950/85 shadow-2xl shadow-black/30 backdrop-blur-xl transition-[width,height,padding] duration-300 ease-out ${isWorkspacePanelOpen ? "left-3 right-3 flex max-h-[calc(100dvh-8rem)] flex-col overflow-hidden p-4 sm:left-6 sm:right-auto sm:w-[365px] sm:p-5" : "left-3 h-11 w-[min(calc(100vw-1.5rem),340px)] overflow-hidden p-1 sm:left-6 sm:w-[320px]"}`}
       >
         {isWorkspacePanelOpen ? (
-          <div className="animate-in fade-in duration-200">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Dependencies &amp; counterparties</p>
-                <h1 className="text-lg font-semibold tracking-tight text-white">See who a company depends on — and why.</h1>
+          <div className="flex min-h-0 flex-1 flex-col animate-in fade-in duration-200">
+            <div className="shrink-0">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-300">Dependencies &amp; counterparties</p>
+                  <h1 className="text-lg font-semibold tracking-tight text-white">See who a company depends on — and why.</h1>
+                </div>
+                {companyId && (
+                  <button
+                    type="button"
+                    onClick={() => setIsLeftPanelOpen(false)}
+                    className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-white/10 hover:text-white"
+                    aria-label="Collapse workspace controls"
+                  >
+                    ×
+                  </button>
+                )}
               </div>
-              {companyId && (
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
+              <p className="mt-1.5 text-xs leading-relaxed text-slate-400">Map the dependencies and counterparties hidden in Indian credit-rating reports, with evidence on every edge.</p>
+
+              <div className="mt-5">
+                <CompanyList companies={sandboxCompanies} selectedId={companyId} onSelect={loadCompany} />
+              </div>
+
+              <div className="my-4 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+                <span className="h-px flex-1 bg-white/10" /> or analyse a report <span className="h-px flex-1 bg-white/10" />
+              </div>
+
+              <div
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  setIsDragging(true);
+                }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={handleDrop}
+                className={`rounded-xl border border-dashed p-4 text-center transition ${isDragging ? "border-cyan-300 bg-cyan-300/10" : "border-white/15 bg-slate-900/60 hover:border-cyan-300/45"}`}
+              >
+                <p className="text-sm font-medium text-slate-200">Drop a rating report</p>
+                <p className="mt-1 text-xs text-slate-500">PDF only · up to 10MB · no account needed</p>
                 <button
                   type="button"
-                  onClick={() => setIsLeftPanelOpen(false)}
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-slate-400 transition hover:bg-white/10 hover:text-white"
-                  aria-label="Collapse workspace controls"
+                  disabled={isAnalysing}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-3 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-wait disabled:opacity-70"
                 >
-                  ×
+                  {isAnalysing ? "Reading report… mapping relationships…" : "Choose PDF"}
                 </button>
-              )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/pdf,.pdf"
+                  className="hidden"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void analysePdf(file);
+                    event.currentTarget.value = "";
+                  }}
+                />
+              </div>
+              {error && <p className="mt-3 rounded-lg border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs leading-relaxed text-rose-200">{error}</p>}
             </div>
-            <p className="mt-1.5 text-xs leading-relaxed text-slate-400">Map the dependencies and counterparties hidden in Indian credit-rating reports, with evidence on every edge.</p>
 
-            <div className="mt-5">
-              <CompanyPicker companies={sandboxCompanies} selectedId={companyId} onSelect={loadCompany} />
-            </div>
-
-            <div className="my-4 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
-              <span className="h-px flex-1 bg-white/10" /> or analyse a report <span className="h-px flex-1 bg-white/10" />
-            </div>
-
-            <div
-              onDragOver={(event) => {
-                event.preventDefault();
-                setIsDragging(true);
-              }}
-              onDragLeave={() => setIsDragging(false)}
-              onDrop={handleDrop}
-              className={`rounded-xl border border-dashed p-4 text-center transition ${isDragging ? "border-cyan-300 bg-cyan-300/10" : "border-white/15 bg-slate-900/60 hover:border-cyan-300/45"}`}
-            >
-              <p className="text-sm font-medium text-slate-200">Drop a rating report</p>
-              <p className="mt-1 text-xs text-slate-500">PDF only · up to 10MB · no account needed</p>
-              <button
-                type="button"
-                disabled={isAnalysing}
-                onClick={() => fileInputRef.current?.click()}
-                className="mt-3 rounded-lg border border-cyan-300/25 bg-cyan-400/10 px-3 py-1.5 text-xs font-semibold text-cyan-100 transition hover:bg-cyan-400/20 disabled:cursor-wait disabled:opacity-70"
-              >
-                {isAnalysing ? "Reading report… mapping relationships…" : "Choose PDF"}
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/pdf,.pdf"
-                className="hidden"
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) void analysePdf(file);
-                  event.currentTarget.value = "";
-                }}
-              />
-            </div>
             {isDevelopment && companyId === null && (
-              <div className="mt-3 rounded-xl border border-violet-300/20 bg-violet-300/5 p-3">
+              <div className="sticky bottom-0 z-10 mt-3 shrink-0 rounded-xl border border-violet-300/20 bg-slate-950/95 p-3 shadow-[0_-8px_20px_rgba(2,6,23,0.5)] backdrop-blur-xl">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold text-violet-100">Development sandbox</p>
@@ -330,7 +336,6 @@ export function SutraWorkspace() {
                 {sandboxMessage && <p className="mt-2 text-[11px] leading-relaxed text-violet-100">{sandboxMessage}</p>}
               </div>
             )}
-            {error && <p className="mt-3 rounded-lg border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs leading-relaxed text-rose-200">{error}</p>}
           </div>
         ) : (
           <button
@@ -346,19 +351,19 @@ export function SutraWorkspace() {
         )}
       </section>
 
-      <section className="absolute bottom-5 left-5 z-10 hidden max-w-[385px] rounded-xl border border-white/10 bg-slate-950/80 p-3.5 backdrop-blur-xl lg:block">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-500">How to read Sutra</p>
-        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1.5 text-[11px] text-slate-300">
+      <section aria-label="How to read Sutra" className="absolute inset-x-0 top-16 z-20 flex h-8 items-center justify-center border-b border-white/10 bg-slate-950/90 px-2 backdrop-blur-xl">
+        <div className="flex items-center justify-center gap-x-1.5 whitespace-nowrap text-[9px] font-medium text-slate-300 sm:gap-x-3 sm:text-[10px]">
+          <span className="hidden font-semibold uppercase tracking-[0.12em] text-slate-500 lg:inline">How to read</span>
           <LegendDot className="bg-cyan-300" label="Target" />
           <LegendDot className="bg-emerald-300" label="Customer" />
           <LegendDot className="bg-rose-300" label="Supplier" />
           <LegendDot className="bg-violet-300" label="Lender" />
           <LegendDot className="bg-amber-300" label="Group" />
-          <LegendDot label="Reported but unnamed" ghost />
+          <LegendDot label="Unnamed" ghost />
         </div>
       </section>
 
-      <div className="absolute right-5 top-20 z-10 hidden w-[340px] lg:block">
+      <div className="absolute right-5 top-28 z-10 hidden w-[340px] lg:block">
         {isRiskPanelOpen ? (
           <aside className="rounded-2xl border border-rose-300/20 bg-slate-950/90 p-4 shadow-2xl shadow-black/30 backdrop-blur-xl transition-opacity duration-300">
             <div className="flex items-start justify-between gap-3">

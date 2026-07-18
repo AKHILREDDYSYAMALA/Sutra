@@ -1,0 +1,133 @@
+{
+  "target_company": "PTC Industries Limited",
+  "rating": "[ICRA]A (Stable)",
+  "report_date": "April 27, 2026",
+  "agency": "ICRA",
+  "nodes": [
+    {
+      "id": "ptc-industries-limited",
+      "label": "PTC Industries Limited",
+      "type": "target",
+      "named": true
+    },
+    {
+      "id": "aerolloy-technologies-limited",
+      "label": "Aerolloy Technologies Limited",
+      "type": "subsidiary",
+      "named": true
+    },
+    {
+      "id": "rolls-royce-marine",
+      "label": "Rolls-Royce Marine",
+      "type": "customer",
+      "named": true
+    },
+    {
+      "id": "dassault-aviation",
+      "label": "Dassault Aviation",
+      "type": "customer",
+      "named": true
+    },
+    {
+      "id": "hindustan-aeronautics-limited",
+      "label": "Hindustan Aeronautics Limited",
+      "type": "customer",
+      "named": true
+    },
+    {
+      "id": "ministry-of-defence",
+      "label": "Ministry of Defence",
+      "type": "customer",
+      "named": true
+    },
+    {
+      "id": "israel-aerospace-industries",
+      "label": "Israel Aerospace Industries",
+      "type": "customer",
+      "named": true
+    },
+    {
+      "id": "blue-origin",
+      "label": "Blue Origin",
+      "type": "customer",
+      "named": true
+    }
+  ],
+  "edges": [
+    {
+      "source": "ptc-industries-limited",
+      "target": "aerolloy-technologies-limited",
+      "relation": "Wholly owned subsidiary",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "ICRA has taken a consolidated view of PTC Industries Limited (PTCIL) and its wholly owned subsidiary, Aerolloy Technologies Limited (ATL), given the common management and significant operational and financial linkages among them.",
+      "source_page": 1,
+      "confidence": "high"
+    },
+    {
+      "source": "ptc-industries-limited",
+      "target": "rolls-royce-marine",
+      "relation": "Reputed client",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "PTCIL operates in niche segments characterised by high technological complexity and entry barriers, which has enabled it to establish long-standing relationships with a reputed client base comprising leading government and global private-sector entities such as Rolls-Royce Marine, Dassault Aviation, Hindustan Aeronautics Limited (HAL), the Ministry of Defence (MoD), Israel Aerospace Industries and Blue Origin.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "ptc-industries-limited",
+      "target": "dassault-aviation",
+      "relation": "Reputed client",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "PTCIL operates in niche segments characterised by high technological complexity and entry barriers, which has enabled it to establish long-standing relationships with a reputed client base comprising leading government and global private-sector entities such as Rolls-Royce Marine, Dassault Aviation, Hindustan Aeronautics Limited (HAL), the Ministry of Defence (MoD), Israel Aerospace Industries and Blue Origin.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "ptc-industries-limited",
+      "target": "hindustan-aeronautics-limited",
+      "relation": "Reputed client",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "PTCIL operates in niche segments characterised by high technological complexity and entry barriers, which has enabled it to establish long-standing relationships with a reputed client base comprising leading government and global private-sector entities such as Rolls-Royce Marine, Dassault Aviation, Hindustan Aeronautics Limited (HAL), the Ministry of Defence (MoD), Israel Aerospace Industries and Blue Origin.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "ptc-industries-limited",
+      "target": "ministry-of-defence",
+      "relation": "Reputed client",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "PTCIL operates in niche segments characterised by high technological complexity and entry barriers, which has enabled it to establish long-standing relationships with a reputed client base comprising leading government and global private-sector entities such as Rolls-Royce Marine, Dassault Aviation, Hindustan Aeronautics Limited (HAL), the Ministry of Defence (MoD), Israel Aerospace Industries and Blue Origin.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "ptc-industries-limited",
+      "target": "israel-aerospace-industries",
+      "relation": "Reputed client",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "PTCIL operates in niche segments characterised by high technological complexity and entry barriers, which has enabled it to establish long-standing relationships with a reputed client base comprising leading government and global private-sector entities such as Rolls-Royce Marine, Dassault Aviation, Hindustan Aeronautics Limited (HAL), the Ministry of Defence (MoD), Israel Aerospace Industries and Blue Origin.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "ptc-industries-limited",
+      "target": "blue-origin",
+      "relation": "Reputed client",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "PTCIL operates in niche segments characterised by high technological complexity and entry barriers, which has enabled it to establish long-standing relationships with a reputed client base comprising leading government and global private-sector entities such as Rolls-Royce Marine, Dassault Aviation, Hindustan Aeronautics Limited (HAL), the Ministry of Defence (MoD), Israel Aerospace Industries and Blue Origin.",
+      "source_page": 2,
+      "confidence": "high"
+    }
+  ],
+  "key_risks": [
+    "High working capital intensity due to requirement to maintain high inventory levels.",
+    "Profitability exposed to fluctuation in raw material prices."
+  ],
+  "verified": true
+}

@@ -1,0 +1,117 @@
+{
+  "target_company": "Hindustan Aeronautics Limited",
+  "rating": "CARE AAA; Stable / CARE A1+",
+  "report_date": "March 09, 2026",
+  "agency": "CARE",
+  "nodes": [
+    {
+      "id": "hindustan-aeronautics-limited",
+      "label": "Hindustan Aeronautics Limited",
+      "type": "target",
+      "named": true
+    },
+    {
+      "id": "government-of-india",
+      "label": "Government of India",
+      "type": "parent",
+      "named": true
+    },
+    {
+      "id": "indian-airforce",
+      "label": "Indian Airforce",
+      "type": "customer",
+      "named": true
+    },
+    {
+      "id": "indian-army",
+      "label": "Indian Army",
+      "type": "customer",
+      "named": true
+    },
+    {
+      "id": "indian-navy",
+      "label": "Indian Navy",
+      "type": "customer",
+      "named": true
+    },
+    {
+      "id": "indian-defence-sector",
+      "label": "Indian defence sector",
+      "type": "industry",
+      "named": true
+    },
+    {
+      "id": "life-insurance-corporation-of-india",
+      "label": "Life Insurance Corporation of India",
+      "type": "lender",
+      "named": true
+    }
+  ],
+  "edges": [
+    {
+      "source": "hindustan-aeronautics-limited",
+      "target": "government-of-india",
+      "relation": "Majority ownership, 71.64% stake",
+      "exposure_pct": 71.64,
+      "risk_flag": null,
+      "source_quote": "GoI continues to have majority ownership (71.64%) in the company.",
+      "source_page": 1,
+      "confidence": "high"
+    },
+    {
+      "source": "hindustan-aeronautics-limited",
+      "target": "indian-airforce",
+      "relation": "Customer with variable price contracts",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "HAL enters variable price contracts with its customers, Indian Airforce, Indian Army and Indian Navy, where future escalation is built into prices excluding forex fluctuation on procurement.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "hindustan-aeronautics-limited",
+      "target": "indian-army",
+      "relation": "Customer with variable price contracts",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "HAL enters variable price contracts with its customers, Indian Airforce, Indian Army and Indian Navy, where future escalation is built into prices excluding forex fluctuation on procurement.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "hindustan-aeronautics-limited",
+      "target": "indian-navy",
+      "relation": "Customer with variable price contracts",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "HAL enters variable price contracts with its customers, Indian Airforce, Indian Army and Indian Navy, where future escalation is built into prices excluding forex fluctuation on procurement.",
+      "source_page": 2,
+      "confidence": "high"
+    },
+    {
+      "source": "hindustan-aeronautics-limited",
+      "target": "indian-defence-sector",
+      "relation": "Majority revenue source",
+      "exposure_pct": null,
+      "risk_flag": "high",
+      "source_quote": "HAL derives majority revenues from the Indian defense sector.",
+      "source_page": 3,
+      "confidence": "high"
+    },
+    {
+      "source": "hindustan-aeronautics-limited",
+      "target": "life-insurance-corporation-of-india",
+      "relation": "Minority stakeholder, 2.45% stake",
+      "exposure_pct": 2.45,
+      "risk_flag": null,
+      "source_quote": "GoI held majority stake of 71.64% in the company, while 2.45 % was held by the Life Insurance Corporation of India as on December 31, 2025.",
+      "source_page": 4,
+      "confidence": "high"
+    }
+  ],
+  "key_risks": [
+    "High dependence on the Ministry of Defence, GoI, for contracts and the annual budget allocation.",
+    "Majority revenues derived from the Indian defense sector."
+  ],
+  "verified": true
+}

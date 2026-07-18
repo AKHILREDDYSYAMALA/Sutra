@@ -187,7 +187,7 @@ function getSafeInsets(panelState: GraphPanelState) {
     return {
       left: panelState.leftPanelOpen ? 16 : 78,
       right: 16,
-      top: panelState.leftPanelOpen ? 465 : 88,
+      top: panelState.leftPanelOpen ? 497 : 128,
       bottom: panelState.evidencePanelOpen || panelState.entityPanelOpen ? 390 : 94,
     };
   }
@@ -197,7 +197,7 @@ function getSafeInsets(panelState: GraphPanelState) {
   return {
     left: panelState.leftPanelOpen ? 405 : 90,
     right: panelState.entityPanelOpen ? 500 : 385,
-    top: 84,
+    top: 128,
     bottom: panelState.evidencePanelOpen || panelState.entityPanelOpen ? 430 : 102,
   };
 }

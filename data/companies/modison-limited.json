@@ -1,0 +1,68 @@
+{
+  "target_company": "Modison Limited",
+  "rating": "CARE A; Stable",
+  "report_date": "December 30, 2025",
+  "agency": "CARE",
+  "nodes": [
+    {
+      "id": "modison-limited",
+      "label": "Modison Limited",
+      "type": "target",
+      "named": true
+    },
+    {
+      "id": "top-five-customers",
+      "label": "Top five customers",
+      "type": "customer",
+      "named": false
+    },
+    {
+      "id": "top-five-suppliers",
+      "label": "Top five suppliers",
+      "type": "supplier",
+      "named": false
+    },
+    {
+      "id": "modison-copper-private-limited",
+      "label": "Modison Copper Private Limited",
+      "type": "group_company",
+      "named": true
+    }
+  ],
+  "edges": [
+    {
+      "source": "modison-limited",
+      "target": "top-five-customers",
+      "relation": "Top five customers account for ~45% of total operating income",
+      "exposure_pct": 45,
+      "risk_flag": "high",
+      "source_quote": "Top five customers account for ~45% of total operating income (TOI).",
+      "source_page": 1,
+      "confidence": "high"
+    },
+    {
+      "source": "modison-limited",
+      "target": "top-five-suppliers",
+      "relation": "Top five suppliers account for ~60 - 65% of purchases",
+      "exposure_pct": 62.5,
+      "risk_flag": "high",
+      "source_quote": "Top five suppliers account for ~60 - 65% of purchases.",
+      "source_page": 1,
+      "confidence": "high"
+    },
+    {
+      "source": "modison-limited",
+      "target": "modison-copper-private-limited",
+      "relation": "Group company",
+      "exposure_pct": null,
+      "risk_flag": null,
+      "source_quote": "Its group company, Modison Copper Private Limited (MCPL; rated CARE BBB+; Stable/ CARE A3+) was established in 1995 and is engaged in manufacturing copper alloy products catering to industries such as switchgear (used in HV electrical contacts), automotive and railways among others.",
+      "source_page": 3,
+      "confidence": "high"
+    }
+  ],
+  "key_risks": [
+    "The company’s high dependence on customers and suppliers leads to concentration risk."
+  ],
+  "verified": true
+}
