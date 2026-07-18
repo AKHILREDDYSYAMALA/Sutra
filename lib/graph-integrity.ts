@@ -139,9 +139,12 @@ export function ensureGraphIntegrity(graph: GraphData): GraphIntegrityResult {
 
   const linkedNodeIds = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
   const unlinkedNodeIds = nodes.filter((node) => node.type !== "target" && !linkedNodeIds.has(node.id)).map((node) => node.id);
+  // A disconnected counterparty carries no usable relationship evidence. Keep its
+  // identity in diagnostics, but never render it as a floating React Flow node.
+  const renderedNodes = nodes.filter((node) => node.type === "target" || linkedNodeIds.has(node.id));
 
   return {
-    graph: { ...graph, nodes, edges },
+    graph: { ...graph, nodes: renderedNodes, edges },
     repairedEdges,
     droppedEdges,
     unlinkedNodeIds,

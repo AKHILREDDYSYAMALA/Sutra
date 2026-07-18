@@ -57,6 +57,28 @@ export const sandboxGraphSchema = graphDataSchema.extend({
   verified: z.boolean().default(false),
 });
 
+export const exclusionReasonSchema = z.enum(["quote_not_verified", "unresolved_endpoint"]);
+export const analysisMetaSchema = z
+  .object({
+    excluded: z.array(
+      z
+        .object({
+          label: z.string(),
+          reason: exclusionReasonSchema,
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+/** Client contract for a successful live analysis response. */
+export const analysisResponseSchema = z
+  .object({
+    graph: graphDataSchema,
+    meta: analysisMetaSchema,
+  })
+  .strict();
+
 export const notRatingReportSchema = z
   .object({
     error: z.literal("not_a_rating_report"),
@@ -78,6 +100,8 @@ export const structuredExtractionEnvelopeSchema = z
 
 export type GraphData = z.infer<typeof graphDataSchema>;
 export type SandboxGraphData = z.infer<typeof sandboxGraphSchema>;
+export type AnalysisMeta = z.infer<typeof analysisMetaSchema>;
+export type AnalysisExclusion = AnalysisMeta["excluded"][number];
 export type GraphNode = GraphData["nodes"][number];
 export type GraphEdge = GraphData["edges"][number];
 export type ExtractionResult = z.infer<typeof extractionResultSchema>;
@@ -89,6 +113,15 @@ export type ExtractionResult = z.infer<typeof extractionResultSchema>;
 export function normaliseForQuoteMatch(value: string) {
   return value
     .toLowerCase()
+    // Page labels are injected by the PDF extractor so the model can cite pages.
+    // They are not report content and must not interrupt a quote at a page break.
+    .replace(/\[\[\s*page\s+\d+\s*\]\]/gi, "")
+    .replace(/\u00ad/g, "")
+    .replace(/\ufb00/g, "ff")
+    .replace(/\ufb01/g, "fi")
+    .replace(/\ufb02/g, "fl")
+    .replace(/\ufb03/g, "ffi")
+    .replace(/\ufb04/g, "ffl")
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201c\u201d]/g, '"')
     .replace(/[\u2013\u2014]/g, "-")
@@ -104,11 +137,16 @@ export function quoteAppearsInReport(sourceQuote: string, reportText: string) {
  * Failed quotes are intentionally omitted; callers can log the dropped count server-side.
  */
 export function validateGraphQuotes(graph: GraphData, reportText: string) {
-  const validEdges = graph.edges.filter((edge) => quoteAppearsInReport(edge.source_quote, reportText));
-  const droppedEdgeCount = graph.edges.length - validEdges.length;
+  const validEdges: GraphEdge[] = [];
+  const droppedEdges: GraphEdge[] = [];
+  graph.edges.forEach((edge) => {
+    if (quoteAppearsInReport(edge.source_quote, reportText)) validEdges.push(edge);
+    else droppedEdges.push(edge);
+  });
 
   return {
     graph: { ...graph, edges: validEdges },
-    droppedEdgeCount,
+    droppedEdgeCount: droppedEdges.length,
+    droppedEdges,
   };
 }

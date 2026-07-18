@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "static:check": "node scripts/check-static-graphs.mjs",
+    "company:manifest": "node scripts/build-company-manifest.mjs",
     "corpus:index": "node scripts/build-corpus-index.mjs",
-    "predev": "npm run static:check && npm run corpus:index",
+    "predev": "npm run static:check && npm run company:manifest && npm run corpus:index",
     "dev": "next dev",
-    "prebuild": "npm run static:check && npm run corpus:index",
+    "prebuild": "npm run static:check && npm run company:manifest && npm run corpus:index",
     "build": "next build",
     "start": "next start",
     "lint": "eslint ."

@@ -24,7 +24,6 @@ type SutraNodeData = {
   entityType: GraphNode["type"];
   named: boolean;
   reportCount: number;
-  unlinked: boolean;
 };
 type SutraFlowNode = Node<SutraNodeData, "sutra">;
 type SutraFlowEdge = Edge<{ evidence: GraphEdge }>;
@@ -51,21 +50,14 @@ const nodeTheme: Record<GraphNode["type"], { accent: string; dot: string; label:
 function SutraNode({ data }: NodeProps<SutraFlowNode>) {
   const theme = nodeTheme[data.entityType];
   const isUnnamed = data.named === false;
-  const isUnlinked = data.unlinked;
 
   return (
     <>
       <Handle type="target" position={Position.Left} className="!h-2 !w-2 !border-0 !bg-slate-500" />
       <div
-        title={
-          isUnlinked
-            ? "This node has no linked relationship in the supplied graph."
-            : data.reportCount > 1
-              ? `Appears in ${data.reportCount} Sutra reports. Click to explore.`
-              : "Click to explore this entity in Sutra's corpus."
-        }
+        title={data.reportCount > 1 ? `Appears in ${data.reportCount} Sutra reports. Click to explore.` : "Click to explore this entity in Sutra's corpus."}
         className={`min-h-[96px] min-w-[188px] max-w-[230px] cursor-pointer rounded-xl border px-3.5 py-3 shadow-xl shadow-slate-950/50 backdrop-blur transition hover:-translate-y-0.5 hover:brightness-125 ${
-          isUnlinked ? "border-dashed border-amber-300/70 bg-amber-300/10" : isUnnamed ? "border-dashed border-slate-400/55 bg-slate-400/5" : theme.accent
+          isUnnamed ? "border-dashed border-slate-400/55 bg-slate-400/5" : theme.accent
         }`}
       >
         <div className="mb-1.5 flex items-start justify-between gap-2">
@@ -80,7 +72,6 @@ function SutraNode({ data }: NodeProps<SutraFlowNode>) {
           )}
         </div>
         <p className="text-sm font-medium leading-snug text-slate-100">{data.label}</p>
-        {isUnlinked && <span className="mt-2 inline-flex rounded-full border border-amber-300/30 bg-amber-300/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-amber-100">Unlinked</span>}
       </div>
       <Handle type="source" position={Position.Right} className="!h-2 !w-2 !border-0 !bg-slate-500" />
     </>
@@ -141,8 +132,6 @@ function layoutNodes(graph: GraphData) {
 }
 
 function toFlowNodes(graph: GraphData): SutraFlowNode[] {
-  const nodeIds = new Set(graph.nodes.map((node) => node.id));
-  const linkedNodeIds = new Set(graph.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)).flatMap((edge) => [edge.source, edge.target]));
   const positions = layoutNodes(graph);
 
   return orderedNodes(graph).map((node) => ({
@@ -154,7 +143,6 @@ function toFlowNodes(graph: GraphData): SutraFlowNode[] {
       entityType: node.type,
       named: node.named,
       reportCount: getCorpusReportCount(node.label),
-      unlinked: node.type !== "target" && !linkedNodeIds.has(node.id),
     },
   }));
 }
@@ -263,19 +251,6 @@ export function RelationshipGraph({ graph, onSelectEdge, onSelectNode, panelStat
   const nodes = useMemo(() => toFlowNodes(graph), [graph]);
   const edges = useMemo(() => toFlowEdges(graph), [graph]);
   const sourceNodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
-  const unlinkedNodeLabels = useMemo(() => {
-    const linkedNodeIds = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
-    return graph.nodes.filter((node) => node.type !== "target" && !linkedNodeIds.has(node.id)).map((node) => node.label);
-  }, [edges, graph.nodes]);
-
-  useEffect(() => {
-    if (unlinkedNodeLabels.length > 0) {
-      console.warn("Sutra graph contains unlinked non-target node(s).", {
-        company: graph.target_company,
-        nodes: unlinkedNodeLabels,
-      });
-    }
-  }, [graph.target_company, unlinkedNodeLabels]);
 
   const handleEdgeClick = useCallback(
     (_: React.MouseEvent, edge: SutraFlowEdge) => {

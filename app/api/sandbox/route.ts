@@ -83,15 +83,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unable to derive a safe sandbox filename." }, { status: 400 });
     }
 
+    let overwritingUnverifiedEntry = false;
     try {
-      await fs.access(destination);
-      return NextResponse.json({ error: "A sandbox file already exists for this company. It was not overwritten." }, { status: 409 });
-    } catch {
+      const existing = sandboxGraphSchema.safeParse(JSON.parse(await fs.readFile(destination, "utf8")));
+      if (!existing.success) {
+        return NextResponse.json({ error: "An existing sandbox file could not be validated. It was not overwritten." }, { status: 409 });
+      }
+      if (existing.data.verified) {
+        return NextResponse.json({ error: "This sandbox entry is verified and cannot be overwritten." }, { status: 409 });
+      }
+      overwritingUnverifiedEntry = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       // The file does not exist, so creating it is safe.
     }
 
     await fs.writeFile(destination, `${JSON.stringify({ ...parsed.data, verified: false }, null, 2)}\n`, "utf8");
-    return NextResponse.json({ id, verified: false }, { status: 201 });
+    return NextResponse.json({ id, verified: false, overwritten: overwritingUnverifiedEntry }, { status: overwritingUnverifiedEntry ? 200 : 201 });
   } catch {
     return NextResponse.json({ error: "Unable to save this graph to the local sandbox." }, { status: 500 });
   }

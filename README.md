@@ -30,9 +30,11 @@ For reports up to 50,000 characters, the complete extracted text is sent to the 
 
 Every file in `data/companies/*.json` adheres exactly to the supplied graph schema. A node without a named counterparty is marked `named: false` and rendered as a ghost node. All static edges have a source quote and page reference, and each quote is checked against its source rationale before it is added.
 
-Static sandbox entries also include a local review marker: `"verified": true`. Only verified entries are indexed into the corpus and offered in the dropdown. During `npm run dev`, a successful live extraction exposes **Save to sandbox**, which writes an unverified `data/companies/{slug}.json`; manually review the evidence, change the marker to `true`, and refresh to make it available in the instant sandbox. The save endpoint is development-only and will not overwrite an existing company file.
+Static sandbox entries also include a local review marker: `"verified": true`. During every development start and production build, Sutra generates `lib/generated-company-manifest.ts` by importing every verified `data/companies/*.json` file. That manifest drives the deployed dropdown, so newly verified companies are not limited to a hard-coded list. Only verified entries are indexed into the corpus and offered in the dropdown.
 
-Before every development server start and production build, `npm run static:check` verifies that static graph edge IDs resolve to real nodes. The live route applies the same guard, deterministically repairs close node-ID matches, drops unresolved edges, and marks any remaining unlinked non-target node visibly in the graph.
+During `npm run dev`, a successful live extraction exposes **Save to sandbox**, which writes an unverified `data/companies/{slug}.json`; manually review the evidence, change the marker to `true`, and refresh to make it available in the instant sandbox. Re-analysis can overwrite an existing unverified entry, while verified entries are protected from overwrite. The save endpoint is development-only.
+
+Before every development server start and production build, `npm run static:check` verifies that static graph edge IDs resolve to real nodes. The live route applies the same guard, deterministically repairs close node-ID matches, and removes unresolved or disconnected counterparties from the rendered graph. Successful live responses return `{ graph, meta }`; `meta.excluded` exposes only entity labels and whether an item was excluded for unverified evidence or an unresolved endpoint.
 
 ## Deployment
 

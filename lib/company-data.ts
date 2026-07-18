@@ -1,6 +1,4 @@
-import amberEnterprises from "@/data/companies/amber-enterprises.json";
-import dixonTechnologies from "@/data/companies/dixon-technologies.json";
-import mtarTechnologies from "@/data/companies/mtar-technologies.json";
+import { verifiedCompanyManifest } from "@/lib/generated-company-manifest";
 import { ensureGraphIntegrity } from "@/lib/graph-integrity";
 import { sandboxGraphSchema, type GraphData } from "@/lib/graph-data";
 
@@ -14,19 +12,11 @@ export type SandboxCompany = CompanyOption & {
   graph: GraphData;
 };
 
-const staticEntries = {
-  "mtar-technologies": sandboxGraphSchema.parse(mtarTechnologies),
-  "dixon-technologies": sandboxGraphSchema.parse(dixonTechnologies),
-  "amber-enterprises": sandboxGraphSchema.parse(amberEnterprises),
-};
-
 const companies: Record<string, GraphData> = Object.fromEntries(
-  Object.entries(staticEntries)
-    .filter(([, entry]) => entry.verified)
-    .map(([id, entry]) => {
-      const { verified: _verified, ...graph } = entry;
-      return [id, ensureGraphIntegrity(graph).graph];
-    }),
+  verifiedCompanyManifest.map(({ id, data }) => {
+    const { verified: _verified, ...graph } = sandboxGraphSchema.parse(data);
+    return [id, ensureGraphIntegrity(graph).graph];
+  }),
 );
 
 export const companyOptions: CompanyOption[] = Object.entries(companies).map(([id, graph]) => ({

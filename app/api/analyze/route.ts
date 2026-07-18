@@ -5,6 +5,7 @@ import { getExtractionSystemPrompt } from "@/lib/extraction-prompt";
 import { extractionResponseFormat } from "@/lib/extraction-schema";
 import { ensureGraphIntegrity } from "@/lib/graph-integrity";
 import {
+  type AnalysisExclusion,
   graphDataSchema,
   normaliseForQuoteMatch,
   notRatingReportSchema,
@@ -65,6 +66,35 @@ function logExtractionMetrics(durationMs: number, usage?: CompletionUsage) {
     output_tokens: usage?.completion_tokens ?? null,
     duration_ms: durationMs,
   });
+}
+
+function labelsForEndpoints(graph: { nodes: Array<{ id: string; label: string; type: string }> }, endpoints: string[]) {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const knownNodes = endpoints.flatMap((endpoint) => {
+    const node = nodeById.get(endpoint);
+    return node ? [node] : [];
+  });
+  const nonTargetLabels = knownNodes.filter((node) => node.type !== "target").map((node) => node.label);
+  return [...new Set(nonTargetLabels.length > 0 ? nonTargetLabels : knownNodes.map((node) => node.label))];
+}
+
+function buildExclusions(
+  sourceGraph: Parameters<typeof validateGraphQuotes>[0],
+  quoteMismatches: ReturnType<typeof validateGraphQuotes>["droppedEdges"],
+  integrity: ReturnType<typeof ensureGraphIntegrity>,
+) {
+  const exclusions = new Map<string, AnalysisExclusion["reason"]>();
+  const add = (labels: string[], reason: AnalysisExclusion["reason"]) => {
+    labels.forEach((label) => {
+      if (!exclusions.has(label) || reason === "quote_not_verified") exclusions.set(label, reason);
+    });
+  };
+
+  quoteMismatches.forEach((edge) => add(labelsForEndpoints(sourceGraph, [edge.source, edge.target]), "quote_not_verified"));
+  integrity.droppedEdges.forEach((edge) => add(labelsForEndpoints(sourceGraph, [edge.source, edge.target]), "unresolved_endpoint"));
+  integrity.unlinkedNodeIds.forEach((nodeId) => add(labelsForEndpoints(sourceGraph, [nodeId]), "unresolved_endpoint"));
+
+  return [...exclusions.entries()].map(([label, reason]) => ({ label, reason }));
 }
 
 async function extractPdfText(fileBuffer: Buffer) {
@@ -205,22 +235,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "The extraction did not match Sutra's evidence schema. Please try again." }, { status: 502 });
     }
 
-    const { graph: quoteValidatedGraph, droppedEdgeCount } = validateGraphQuotes(parsed.data, fullText);
+    const { graph: quoteValidatedGraph, droppedEdgeCount, droppedEdges } = validateGraphQuotes(parsed.data, fullText);
     const integrity = ensureGraphIntegrity(quoteValidatedGraph);
+    const excluded = buildExclusions(parsed.data, droppedEdges, integrity);
 
     if (droppedEdgeCount > 0 || integrity.droppedEdges.length > 0 || integrity.repairedEdges.length > 0 || integrity.unlinkedNodeIds.length > 0 || integrity.duplicateNodeIds.length > 0) {
-      console.warn("Sutra dropped unverified extraction edges.", {
+      console.warn("Sutra extraction integrity adjustments.", {
         quoteMismatch: droppedEdgeCount,
         unresolvedEndpoint: integrity.droppedEdges.length,
         repairedEndpoint: integrity.repairedEdges.length,
         unlinkedNodes: integrity.unlinkedNodeIds,
         duplicateNodeIds: integrity.duplicateNodeIds,
+        excludedEntities: excluded.length,
         returnedEdges: integrity.graph.edges.length,
       });
     }
 
-    // Successful responses deliberately conform to the graph schema exactly.
-    return NextResponse.json(integrity.graph);
+    return NextResponse.json({ graph: integrity.graph, meta: { excluded } });
   } catch {
     // Do not log request headers or SDK error objects: they may contain sensitive context.
     console.error("Sutra PDF analysis failed.");

@@ -13,12 +13,13 @@ import {
   graphReportIdentity,
   type CorpusRelationship,
 } from "@/lib/corpus";
-import { graphDataSchema, type GraphData, type GraphEdge, type GraphNode } from "@/lib/graph-data";
+import { analysisResponseSchema, graphDataSchema, type AnalysisMeta, type GraphData, type GraphEdge, type GraphNode } from "@/lib/graph-data";
 import { getRiskVerdict } from "@/lib/risk-summary";
 
 const initialCompanyId = "mtar-technologies";
 const isDevelopment = process.env.NODE_ENV === "development";
 const liveSessionStorageKey = "sutra.live-graphs.v1";
+const emptyAnalysisMeta: AnalysisMeta = { excluded: [] };
 
 const edgeRiskLabel: Record<NonNullable<GraphEdge["risk_flag"]>, string> = {
   high: "High risk",
@@ -38,8 +39,10 @@ export function SutraWorkspace() {
   const [isSavingToSandbox, setIsSavingToSandbox] = useState(false);
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(false);
   const [isRiskPanelOpen, setIsRiskPanelOpen] = useState(false);
+  const [isExclusionsOpen, setIsExclusionsOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sandboxMessage, setSandboxMessage] = useState<string | null>(null);
+  const [analysisMeta, setAnalysisMeta] = useState<AnalysisMeta>(emptyAnalysisMeta);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const riskVerdict = getRiskVerdict(graph);
   const isWorkspacePanelOpen = isLeftPanelOpen || companyId === null;
@@ -131,6 +134,8 @@ export function SutraWorkspace() {
     if (!company) return;
     setCompanyId(id);
     setGraph(company.graph);
+    setAnalysisMeta(emptyAnalysisMeta);
+    setIsExclusionsOpen(false);
     setSelectedEdge(null);
     setSelectedEntityNode(null);
     setError(null);
@@ -164,13 +169,15 @@ export function SutraWorkspace() {
         throw new Error(message);
       }
 
-      const parsedGraph = graphDataSchema.safeParse(payload);
-      if (!parsedGraph.success) throw new Error("The analysis returned an invalid graph. Please try another report.");
+      const parsedResponse = analysisResponseSchema.safeParse(payload);
+      if (!parsedResponse.success) throw new Error("The analysis returned an invalid graph. Please try another report.");
 
-      setGraph(parsedGraph.data);
+      setGraph(parsedResponse.data.graph);
+      setAnalysisMeta(parsedResponse.data.meta);
+      setIsExclusionsOpen(false);
       setSessionGraphs((currentGraphs) => {
-        const nextGraphs = currentGraphs.filter((currentGraph) => graphReportIdentity(currentGraph) !== graphReportIdentity(parsedGraph.data));
-        return [...nextGraphs, parsedGraph.data];
+        const nextGraphs = currentGraphs.filter((currentGraph) => graphReportIdentity(currentGraph) !== graphReportIdentity(parsedResponse.data.graph));
+        return [...nextGraphs, parsedResponse.data.graph];
       });
       setCompanyId(null);
       setIsLeftPanelOpen(false);
@@ -378,6 +385,32 @@ export function SutraWorkspace() {
                 </li>
               ))}
             </ul>
+            {analysisMeta.excluded.length > 0 && (
+              <div className="mt-4 border-t border-white/10 pt-3">
+                <button
+                  type="button"
+                  onClick={() => setIsExclusionsOpen((open) => !open)}
+                  className="flex w-full items-start justify-between gap-3 rounded-lg border border-amber-300/20 bg-amber-300/5 px-3 py-2 text-left transition hover:bg-amber-300/10"
+                  aria-expanded={isExclusionsOpen}
+                  aria-label="Toggle excluded relationships"
+                >
+                  <span className="text-[11px] leading-relaxed text-amber-100">
+                    {analysisMeta.excluded.length} reported relationship{analysisMeta.excluded.length === 1 ? "" : "s"} excluded because their evidence could not be verified verbatim.
+                  </span>
+                  <span className="shrink-0 text-sm text-amber-200">{isExclusionsOpen ? "⌃" : "⌄"}</span>
+                </button>
+                {isExclusionsOpen && (
+                  <ul className="mt-2 space-y-1.5 px-2 text-[11px] text-slate-300">
+                    {analysisMeta.excluded.map((item) => (
+                      <li key={`${item.reason}-${item.label}`} className="flex gap-2">
+                        <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-amber-300" />
+                        {item.label}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
           </aside>
         ) : (
           <button
@@ -432,7 +465,7 @@ export function SutraWorkspace() {
                   ))}
                 </div>
               ) : (
-                <p className="rounded-xl border border-dashed border-amber-300/30 bg-amber-300/5 p-3 text-xs leading-relaxed text-amber-100">This node is unlinked in the current graph. Sutra has flagged it visually and in the console.</p>
+                <p className="rounded-xl border border-white/10 bg-slate-900/55 p-3 text-xs leading-relaxed text-slate-400">No linked relationship is available for this entity in the current report.</p>
               )}
             </section>
 
