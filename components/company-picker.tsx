@@ -1,6 +1,7 @@
 "use client";
 
 import type { SandboxCompany } from "@/lib/company-data";
+import { formatRating } from "@/lib/report-provenance";
 import { getRiskVerdict } from "@/lib/risk-summary";
 
 type CompanyListProps = {
@@ -42,7 +43,12 @@ export function CompanyList({ companies, selectedId, onSelect }: CompanyListProp
               }`}
             >
               <span className={`h-2 w-2 shrink-0 rounded-full ${severityDot[verdict.tone]}`} aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-100" title={company.name}>{company.name}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-xs font-medium text-slate-100" title={company.name}>{company.name}</span>
+                <span className="mt-0.5 block truncate text-[9px] font-medium text-slate-500" title={formatRating(company.graph.rating, company.agency)}>
+                  {formatRating(company.graph.rating, company.agency)}
+                </span>
+              </span>
               <span className="shrink-0 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-400" title={agencyLabel(company.agency)}>
                 {company.agency ?? "—"}
               </span>

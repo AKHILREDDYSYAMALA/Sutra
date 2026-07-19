@@ -16,6 +16,7 @@ import {
 } from "@/lib/corpus";
 import { getDependencyRead, type DependencyReadLine } from "@/lib/dependency-read";
 import { analysisResponseSchema, graphDataSchema, type AnalysisMeta, type GraphData, type GraphEdge, type GraphNode } from "@/lib/graph-data";
+import { getReportProvenance } from "@/lib/report-provenance";
 
 const initialCompanyId = "mtar-technologies";
 const isDevelopment = process.env.NODE_ENV === "development";
@@ -374,6 +375,7 @@ export function SutraWorkspace() {
         {isRiskPanelOpen ? (
           <DependencyReadCard
             read={dependencyRead}
+            provenance={getReportProvenance(graph)}
             onCollapse={() => setIsRiskPanelOpen(false)}
             onSelectLine={(line: DependencyReadLine) => openEvidence(line.edges)}
           />

@@ -4,6 +4,7 @@ import type { DependencyRead, DependencyReadLine } from "@/lib/dependency-read";
 
 type DependencyReadCardProps = {
   read: DependencyRead;
+  provenance: string;
   onCollapse: () => void;
   onSelectLine: (line: DependencyReadLine) => void;
 };
@@ -20,7 +21,7 @@ const lineTone: Record<DependencyReadLine["tone"], string> = {
   low: "text-slate-300",
 };
 
-export function DependencyReadCard({ read, onCollapse, onSelectLine }: DependencyReadCardProps) {
+export function DependencyReadCard({ read, provenance, onCollapse, onSelectLine }: DependencyReadCardProps) {
   const theme = toneClasses[read.tone];
 
   return (
@@ -38,6 +39,7 @@ export function DependencyReadCard({ read, onCollapse, onSelectLine }: Dependenc
           ×
         </button>
       </div>
+      <p className="mt-2 border-l-2 border-cyan-300/45 pl-2 text-[10px] font-medium leading-relaxed text-slate-400">{provenance}</p>
       <p className="mt-2 text-sm font-semibold leading-snug text-slate-100">{read.headline}</p>
       <div className="mt-3 space-y-1.5 border-t border-white/10 pt-2.5">
         {read.lines.map((line) => {
