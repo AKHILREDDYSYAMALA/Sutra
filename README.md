@@ -56,7 +56,7 @@ Every file in `data/companies/*.json` follows the graph schema exactly. Nodes wi
 
 ```bash
 npm install
-cp .env.example .env.local   # paste your OPENAI_API_KEY for live analysis
+touch .env.local             # add OPENAI_API_KEY for live analysis
 npm run dev
 ```
 
