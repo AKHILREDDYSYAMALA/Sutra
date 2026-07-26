@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import {
   claims,
   companies,
   documents,
   entities,
+  entityMerges,
   eventEntities,
   events,
   users,
@@ -77,6 +78,14 @@ async function smoke() {
         .returning();
       assert.ok(targetEntity);
 
+      const [multiHopEntity, multiHopCanonical, cycleEntity, cyclePeer] = await Promise.all([
+        tx.insert(entities).values({ canonicalName: "Smoke Merge Hop B", normalizedName: "smoke merge hop b", entityType: "company" }).returning().then(([entity]) => entity),
+        tx.insert(entities).values({ canonicalName: "Smoke Merge Hop C", normalizedName: "smoke merge hop c", entityType: "company" }).returning().then(([entity]) => entity),
+        tx.insert(entities).values({ canonicalName: "Smoke Merge Cycle A", normalizedName: "smoke merge cycle a", entityType: "company" }).returning().then(([entity]) => entity),
+        tx.insert(entities).values({ canonicalName: "Smoke Merge Cycle B", normalizedName: "smoke merge cycle b", entityType: "company" }).returning().then(([entity]) => entity),
+      ]);
+      assert.ok(multiHopEntity && multiHopCanonical && cycleEntity && cyclePeer);
+
       const [document] = await tx
         .insert(documents)
         .values({
@@ -141,6 +150,38 @@ async function smoke() {
         })
         .returning();
       assert.ok(replacementClaim);
+
+      const [cycleClaim] = await tx
+        .insert(claims)
+        .values({
+          ...claimValues,
+          sourceEntityId: cycleEntity.id,
+          quote: "The cycle-resolution smoke claim remains safe to read.",
+        })
+        .returning();
+      assert.ok(cycleClaim);
+
+      await tx.insert(entityMerges).values([
+        { fromEntityId: sourceEntity.id, intoEntityId: multiHopEntity.id, performedBy: "human", reason: "smoke multi-hop" },
+        { fromEntityId: multiHopEntity.id, intoEntityId: multiHopCanonical.id, performedBy: "human", reason: "smoke multi-hop" },
+        { fromEntityId: targetEntity.id, intoEntityId: multiHopCanonical.id, performedBy: "human", reason: "smoke reverted merge", revertedAt: new Date(), revertedReason: "smoke test reversal" },
+        { fromEntityId: cycleEntity.id, intoEntityId: cyclePeer.id, performedBy: "human", reason: "smoke cycle" },
+        { fromEntityId: cyclePeer.id, intoEntityId: cycleEntity.id, performedBy: "human", reason: "smoke cycle" },
+      ]);
+
+      const resolvedRows = await tx.execute<{
+        id: string;
+        source_entity_resolved: string;
+        target_entity_resolved: string;
+      }>(sql`
+        select id, source_entity_resolved, target_entity_resolved
+        from claims_resolved
+        where id in (${originalClaim.id}, ${cycleClaim.id})
+      `);
+      const resolvedByClaimId = new Map(resolvedRows.map((row) => [row.id, row]));
+      assert.equal(resolvedByClaimId.get(originalClaim.id)?.source_entity_resolved, multiHopCanonical.id, "claims_resolved follows a multi-hop merge");
+      assert.equal(resolvedByClaimId.get(originalClaim.id)?.target_entity_resolved, targetEntity.id, "claims_resolved ignores a reverted merge");
+      assert.equal(resolvedByClaimId.get(cycleClaim.id)?.source_entity_resolved, cycleEntity.id, "claims_resolved terminates a cycle at its origin");
 
       const [supersededClaim] = await tx
         .update(claims)

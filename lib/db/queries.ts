@@ -23,7 +23,7 @@ import {
   type Document,
   type NewClaim,
 } from "../../db/schema";
-import { entityFamily, resolveEntity, type EntityMerge } from "../domain/entity-resolution";
+import { resolveEntity, type EntityMerge } from "../domain/entity-resolution";
 import type { LedgerGraph } from "../domain/graph";
 import type { DatabaseClient } from "./client";
 
@@ -526,7 +526,6 @@ export type EntityAcrossCorpusClaim = {
 export async function getEntityAcrossCorpus(db: DatabaseClient, entityId: string): Promise<{ entityId: string; claims: EntityAcrossCorpusClaim[] }> {
   const merges = await listEntityMerges(db);
   const resolvedEntityId = resolveEntity(entityId, merges);
-  const family = [...entityFamily(resolvedEntityId, merges)];
 
   const rows = await db
     .select({
@@ -554,7 +553,15 @@ export async function getEntityAcrossCorpus(db: DatabaseClient, entityId: string
     .innerJoin(documents, eq(documents.id, claims.documentId))
     .innerJoin(sourceEntities, eq(sourceEntities.id, claims.sourceEntityId))
     .innerJoin(targetEntities, eq(targetEntities.id, claims.targetEntityId))
-    .where(and(inArray(claims.verificationTier, verifiedTiers), or(inArray(claims.sourceEntityId, family), inArray(claims.targetEntityId, family))))
+    .where(and(
+      inArray(claims.verificationTier, verifiedTiers),
+      sql`${claims.id} in (
+        select "id"
+        from "claims_resolved"
+        where "source_entity_resolved" = ${resolvedEntityId}
+           or "target_entity_resolved" = ${resolvedEntityId}
+      )`,
+    ))
     .orderBy(desc(documents.publishedDate), desc(claims.createdAt));
 
   return {

@@ -19,6 +19,9 @@
     "db:verify-import": "tsx db/verify-import.ts",
     "db:backfill-static-metadata": "tsx db/backfill-static-metadata.ts",
     "db:seed-aliases": "tsx db/seed-aliases.ts",
+    "db:verify-resolution": "tsx db/verify-resolution.ts",
+    "db:entity-review": "tsx db/entity-review.ts",
+    "db:merge-entities": "tsx db/merge-entities.ts",
     "verify:parity": "tsx scripts/verify-ui-parity.mjs",
     "test:entity-normalization": "tsx --test lib/entity-normalization.test.ts",
     "test:domain": "tsx --test lib/domain/*.test.ts"

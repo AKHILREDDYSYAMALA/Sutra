@@ -1,11 +1,9 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { claims, companies, documents, entities } from "./schema";
-import { entityMerges } from "./schema";
 import { loadStaticGraphFiles } from "./static-graphs";
 import { requiredDirectUrl } from "./env";
 import { createDatabaseClient } from "../lib/db/client";
-import { resolveEntity } from "../lib/domain/entity-resolution";
 
 type VerificationRow = {
   company: string;
@@ -14,6 +12,12 @@ type VerificationRow = {
   quotes_match: boolean;
   pages_match: boolean;
   exposure_match: boolean;
+};
+
+type ResolvedClaimEndpoint = {
+  document_id: string;
+  source_entity_resolved: string;
+  target_entity_resolved: string;
 };
 
 function sorted(values: string[]): string[] {
@@ -95,20 +99,22 @@ async function main() {
       }
     }
 
-    const [allCompanies, allDocuments, allEntities, allClaims, allMerges] = await Promise.all([
+    const [allCompanies, allDocuments, allEntities, allClaims, resolvedEndpoints] = await Promise.all([
       db.select().from(companies),
       db.select().from(documents),
       db.select().from(entities),
       db.select().from(claims),
-      db.select().from(entityMerges),
+      db.execute<ResolvedClaimEndpoint>(sql`
+        select document_id, source_entity_resolved, target_entity_resolved
+        from claims_resolved
+      `),
     ]);
     const documentsByEntity = new Map<string, Set<string>>();
-    for (const claim of allClaims) {
-      for (const entityId of [claim.sourceEntityId, claim.targetEntityId]) {
-        const resolvedEntityId = resolveEntity(entityId, allMerges);
-        const entityDocuments = documentsByEntity.get(resolvedEntityId) ?? new Set<string>();
-        entityDocuments.add(claim.documentId);
-        documentsByEntity.set(resolvedEntityId, entityDocuments);
+    for (const endpoint of resolvedEndpoints) {
+      for (const entityId of [endpoint.source_entity_resolved, endpoint.target_entity_resolved]) {
+        const entityDocuments = documentsByEntity.get(entityId) ?? new Set<string>();
+        entityDocuments.add(endpoint.document_id);
+        documentsByEntity.set(entityId, entityDocuments);
       }
     }
     const multiDocumentEntities = [...documentsByEntity.values()].filter(
