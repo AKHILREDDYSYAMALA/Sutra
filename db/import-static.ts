@@ -149,6 +149,10 @@ async function importFile(
         status: "discovered",
         isPrivate: false,
         uploadedByUserId: null,
+        metadata: {
+          keyRisks: staticFile.graph.key_risks,
+          reportDateRaw: staticFile.graph.report_date,
+        },
       })
       .returning();
 

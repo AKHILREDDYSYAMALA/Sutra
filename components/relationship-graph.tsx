@@ -16,7 +16,7 @@ import {
   type NodeProps,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { getCorpusReportCount } from "@/lib/corpus";
+import { getCorpusReportCount, type CorpusIndex } from "@/lib/domain/corpus";
 import type { GraphData, GraphEdge, GraphNode } from "@/lib/graph-data";
 
 type SutraNodeData = {
@@ -134,7 +134,7 @@ function layoutNodes(graph: GraphData) {
   );
 }
 
-function toFlowNodes(graph: GraphData, highlightedNodeIds: Set<string>): SutraFlowNode[] {
+function toFlowNodes(graph: GraphData, corpus: CorpusIndex, highlightedNodeIds: Set<string>): SutraFlowNode[] {
   const positions = layoutNodes(graph);
 
   return orderedNodes(graph).map((node) => ({
@@ -145,7 +145,7 @@ function toFlowNodes(graph: GraphData, highlightedNodeIds: Set<string>): SutraFl
       label: node.label,
       entityType: node.type,
       named: node.named,
-      reportCount: getCorpusReportCount(node.label),
+      reportCount: getCorpusReportCount(corpus, node.label),
       highlighted: highlightedNodeIds.has(node.id),
     },
   }));
@@ -187,6 +187,7 @@ type RelationshipGraphProps = {
   onSelectEdge: (edge: GraphEdge) => void;
   onSelectNode: (node: GraphNode) => void;
   panelState: GraphPanelState;
+  corpus: CorpusIndex;
   highlightedEdges?: GraphEdge[];
 };
 
@@ -257,10 +258,10 @@ function PanelAwareViewport({ graphKey, panelState }: { graphKey: string; panelS
   return null;
 }
 
-export function RelationshipGraph({ graph, onSelectEdge, onSelectNode, panelState, highlightedEdges = [] }: RelationshipGraphProps) {
+export function RelationshipGraph({ graph, onSelectEdge, onSelectNode, panelState, corpus, highlightedEdges = [] }: RelationshipGraphProps) {
   const highlightedEdgeIds = useMemo(() => new Set(highlightedEdges.map(edgeIdentity)), [highlightedEdges]);
   const highlightedNodeIds = useMemo(() => new Set(highlightedEdges.flatMap((edge) => [edge.source, edge.target])), [highlightedEdges]);
-  const nodes = useMemo(() => toFlowNodes(graph, highlightedNodeIds), [graph, highlightedNodeIds]);
+  const nodes = useMemo(() => toFlowNodes(graph, corpus, highlightedNodeIds), [corpus, graph, highlightedNodeIds]);
   const edges = useMemo(() => toFlowEdges(graph, highlightedEdgeIds), [graph, highlightedEdgeIds]);
   const sourceNodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
 

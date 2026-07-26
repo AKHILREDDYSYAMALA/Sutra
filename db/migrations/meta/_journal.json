@@ -15,6 +15,13 @@
       "when": 1785072257045,
       "tag": "0001_wonderful_sleepwalker",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785077969108,
+      "tag": "0002_good_wendigo",
+      "breakpoints": true
     }
   ]
 }

@@ -89,6 +89,7 @@ export const documents = pgTable(
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
     uploadedByUserId: uuid("uploaded_by_user_id").references(() => users.id),
     isPrivate: boolean("is_private").notNull().default(false),
+    metadata: jsonb("metadata").notNull().default({}),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

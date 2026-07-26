@@ -4,22 +4,23 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CompanyList } from "@/components/company-picker";
 import { DependencyReadCard } from "@/components/dependency-read";
 import { RelationshipGraph } from "@/components/relationship-graph";
-import { staticSandboxCompanies, type SandboxCompany } from "@/lib/company-data";
+import type { SandboxCompany } from "@/lib/company-data";
 import {
+  type CorpusIndex,
   formatCorpusExposure,
   getCorpusEntity,
   getGraphRelationshipsForEntity,
-  getOtherStaticCorpusRelationships,
+  getOtherCorpusRelationships,
   getSessionCorpusRelationships,
   graphReportIdentity,
   type CorpusRelationship,
-} from "@/lib/corpus";
-import { getDependencyRead, type DependencyReadLine } from "@/lib/dependency-read";
+} from "@/lib/domain/corpus";
+import { getDependencyRead, type DependencyReadLine } from "@/lib/domain/dependency-read";
+import { edgeIdentity, prepareGraphForRendering } from "@/lib/domain/graph";
 import { analysisResponseSchema, graphDataSchema, type AnalysisMeta, type GraphData, type GraphEdge, type GraphNode } from "@/lib/graph-data";
 import { getReportProvenance } from "@/lib/report-provenance";
 
 const initialCompanyId = "mtar-technologies";
-const isDevelopment = process.env.NODE_ENV === "development";
 const liveSessionStorageKey = "sutra.live-graphs.v1";
 const emptyAnalysisMeta: AnalysisMeta = { excluded: [] };
 
@@ -29,27 +30,43 @@ const edgeRiskLabel: Record<NonNullable<GraphEdge["risk_flag"]>, string> = {
   low: "Low risk",
 };
 
-export function SutraWorkspace() {
-  const [companyId, setCompanyId] = useState<string | null>(initialCompanyId);
-  const [graph, setGraph] = useState<GraphData>(() => staticSandboxCompanies.find((company) => company.id === initialCompanyId)!.graph);
-  const [sandboxCompanies, setSandboxCompanies] = useState<SandboxCompany[]>(staticSandboxCompanies);
+const verificationTierLabel = {
+  human_verified: "Human-verified",
+  machine_validated: "Machine-validated",
+  excluded: "Excluded",
+} as const;
+
+type SutraWorkspaceProps = {
+  companies: SandboxCompany[];
+  corpus: CorpusIndex;
+};
+
+export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
+  const initialCompany = companies.find((company) => company.id === initialCompanyId) ?? companies[0];
+  if (!initialCompany) throw new Error("Sutra requires at least one verified database company.");
+
+  const [companyId, setCompanyId] = useState<string | null>(initialCompany.id);
+  const [graph, setGraph] = useState<GraphData>(initialCompany.graph);
+  const [verificationTiers, setVerificationTiers] = useState(initialCompany.verificationTiers);
+  const [excludedClaimCount, setExcludedClaimCount] = useState(initialCompany.excludedClaimCount);
   const [sessionGraphs, setSessionGraphs] = useState<GraphData[]>([]);
   const [selectedEvidenceEdges, setSelectedEvidenceEdges] = useState<GraphEdge[]>([]);
   const [selectedEntityNode, setSelectedEntityNode] = useState<GraphNode | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalysing, setIsAnalysing] = useState(false);
-  const [isSavingToSandbox, setIsSavingToSandbox] = useState(false);
   const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
   const [isRiskPanelOpen, setIsRiskPanelOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sandboxMessage, setSandboxMessage] = useState<string | null>(null);
   const [analysisMeta, setAnalysisMeta] = useState<AnalysisMeta>(emptyAnalysisMeta);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedEdge = selectedEvidenceEdges[0] ?? null;
-  const dependencyRead = useMemo(() => getDependencyRead(graph, companyId === null ? analysisMeta : undefined), [analysisMeta, companyId, graph]);
+  const dependencyRead = useMemo(
+    () => getDependencyRead(graph, { excludedCount: companyId === null ? analysisMeta.excluded.length : excludedClaimCount }),
+    [analysisMeta.excluded.length, companyId, excludedClaimCount, graph],
+  );
   const isWorkspacePanelOpen = isLeftPanelOpen || companyId === null;
-  const selectedCompanyName = sandboxCompanies.find((company) => company.id === companyId)?.name ?? graph.target_company;
-  const selectedCorpusEntity = useMemo(() => (selectedEntityNode ? getCorpusEntity(selectedEntityNode.label) : null), [selectedEntityNode]);
+  const selectedCompanyName = companies.find((company) => company.id === companyId)?.name ?? graph.target_company;
+  const selectedCorpusEntity = useMemo(() => (selectedEntityNode ? getCorpusEntity(corpus, selectedEntityNode.label) : null), [corpus, selectedEntityNode]);
   const currentReportRelationships = useMemo(
     () => (selectedEntityNode ? getGraphRelationshipsForEntity(graph, selectedEntityNode.id) : []),
     [graph, selectedEntityNode],
@@ -57,8 +74,8 @@ export function SutraWorkspace() {
   const otherCorpusRelationships = useMemo(() => {
     if (!selectedEntityNode) return [];
     const relationships = [
-      ...getOtherStaticCorpusRelationships(selectedEntityNode.label, graph),
-      ...getSessionCorpusRelationships(sessionGraphs, selectedEntityNode.label, graph),
+      ...getOtherCorpusRelationships(corpus, selectedEntityNode.label, graph),
+      ...getSessionCorpusRelationships(corpus, sessionGraphs, selectedEntityNode.label, graph),
     ];
     return relationships.filter(
       (relationship, index) =>
@@ -71,7 +88,7 @@ export function SutraWorkspace() {
             candidate.source_quote === relationship.source_quote,
         ) === index,
     );
-  }, [graph, selectedEntityNode, sessionGraphs]);
+  }, [corpus, graph, selectedEntityNode, sessionGraphs]);
   const panelState = useMemo(
     () => ({
       leftPanelOpen: isWorkspacePanelOpen,
@@ -81,32 +98,6 @@ export function SutraWorkspace() {
     }),
     [isRiskPanelOpen, isWorkspacePanelOpen, selectedEdge, selectedEntityNode],
   );
-
-  useEffect(() => {
-    if (!isDevelopment) return;
-    let cancelled = false;
-
-    void fetch("/api/sandbox")
-      .then(async (response) => {
-        if (!response.ok) throw new Error("sandbox unavailable");
-        const payload: unknown = await response.json();
-        const candidates = typeof payload === "object" && payload && "companies" in payload && Array.isArray(payload.companies) ? payload.companies : [];
-        const verifiedCompanies = candidates.flatMap((candidate) => {
-          if (!candidate || typeof candidate !== "object" || !("id" in candidate) || !("name" in candidate) || !("graph" in candidate)) return [];
-          const parsedGraph = graphDataSchema.safeParse(candidate.graph);
-          if (!parsedGraph.success || typeof candidate.id !== "string" || typeof candidate.name !== "string") return [];
-          return [{ id: candidate.id, name: candidate.name, agency: parsedGraph.data.agency, graph: parsedGraph.data }];
-        });
-        if (!cancelled) setSandboxCompanies(verifiedCompanies);
-      })
-      .catch(() => {
-        // The pre-bundled verified graphs remain available when the local endpoint is unavailable.
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     try {
@@ -142,10 +133,12 @@ export function SutraWorkspace() {
   }
 
   function loadCompany(id: string) {
-    const company = sandboxCompanies.find((entry) => entry.id === id);
+    const company = companies.find((entry) => entry.id === id);
     if (!company) return;
     setCompanyId(id);
     setGraph(company.graph);
+    setVerificationTiers(company.verificationTiers);
+    setExcludedClaimCount(company.excludedClaimCount);
     setAnalysisMeta(emptyAnalysisMeta);
     closeEvidence();
     setSelectedEntityNode(null);
@@ -163,7 +156,6 @@ export function SutraWorkspace() {
     }
 
     setError(null);
-    setSandboxMessage(null);
     setIsAnalysing(true);
     closeEvidence();
     setSelectedEntityNode(null);
@@ -182,15 +174,17 @@ export function SutraWorkspace() {
       const parsedResponse = analysisResponseSchema.safeParse(payload);
       if (!parsedResponse.success) throw new Error("The analysis returned an invalid graph. Please try another report.");
 
-      setGraph(parsedResponse.data.graph);
+      const renderedGraph = prepareGraphForRendering(parsedResponse.data.graph);
+      setGraph(renderedGraph);
+      setVerificationTiers(Object.fromEntries(renderedGraph.edges.map((edge) => [edgeIdentity(edge), "machine_validated" as const])));
+      setExcludedClaimCount(parsedResponse.data.meta.excluded.length);
       setAnalysisMeta(parsedResponse.data.meta);
       setSessionGraphs((currentGraphs) => {
-        const nextGraphs = currentGraphs.filter((currentGraph) => graphReportIdentity(currentGraph) !== graphReportIdentity(parsedResponse.data.graph));
-        return [...nextGraphs, parsedResponse.data.graph];
+        const nextGraphs = currentGraphs.filter((currentGraph) => graphReportIdentity(currentGraph) !== graphReportIdentity(renderedGraph));
+        return [...nextGraphs, renderedGraph];
       });
       setCompanyId(null);
       setIsLeftPanelOpen(false);
-      setSandboxMessage(null);
     } catch (caughtError) {
       setError(caughtError instanceof Error ? caughtError.message : "Unable to analyse this report.");
     } finally {
@@ -205,30 +199,6 @@ export function SutraWorkspace() {
     if (file) void analysePdf(file);
   }
 
-  async function saveToSandbox() {
-    if (!isDevelopment || companyId !== null) return;
-    setIsSavingToSandbox(true);
-    setSandboxMessage(null);
-
-    try {
-      const response = await fetch("/api/sandbox", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ graph }),
-      });
-      const payload: unknown = await response.json();
-      if (!response.ok) {
-        const message = typeof payload === "object" && payload && "error" in payload ? String(payload.error) : "Unable to save this graph to the sandbox.";
-        throw new Error(message);
-      }
-      setSandboxMessage("Saved as unverified. Set verified: true in its JSON file, then refresh to add it to Instant sandbox.");
-    } catch (caughtError) {
-      setSandboxMessage(caughtError instanceof Error ? caughtError.message : "Unable to save this graph to the sandbox.");
-    } finally {
-      setIsSavingToSandbox(false);
-    }
-  }
-
   return (
     <main className="relative h-[100dvh] min-h-[680px] overflow-hidden bg-[#07101f] text-slate-100">
       <RelationshipGraph
@@ -239,6 +209,7 @@ export function SutraWorkspace() {
           setSelectedEntityNode(node);
         }}
         panelState={panelState}
+        corpus={corpus}
         highlightedEdges={selectedEvidenceEdges}
       />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(8,145,178,0.08),transparent_38%),linear-gradient(180deg,rgba(2,6,23,0.2),rgba(2,6,23,0.45))]" />
@@ -284,7 +255,7 @@ export function SutraWorkspace() {
               <p className="mt-1.5 text-xs leading-relaxed text-slate-400">Map the dependencies and counterparties hidden in Indian credit-rating reports, with evidence on every edge.</p>
 
               <div className="mt-5">
-                <CompanyList companies={sandboxCompanies} selectedId={companyId} onSelect={loadCompany} />
+                <CompanyList companies={companies} selectedId={companyId} onSelect={loadCompany} />
               </div>
 
               <div className="my-4 flex items-center gap-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-600">
@@ -325,25 +296,6 @@ export function SutraWorkspace() {
               {error && <p className="mt-3 rounded-lg border border-rose-400/20 bg-rose-400/10 px-3 py-2 text-xs leading-relaxed text-rose-200">{error}</p>}
             </div>
 
-            {isDevelopment && companyId === null && (
-              <div className="sticky bottom-0 z-10 mt-3 shrink-0 rounded-xl border border-violet-300/20 bg-slate-950/95 p-3 shadow-[0_-8px_20px_rgba(2,6,23,0.5)] backdrop-blur-xl">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold text-violet-100">Development sandbox</p>
-                    <p className="mt-0.5 text-[11px] leading-relaxed text-slate-400">Persist this live graph locally for your manual evidence review.</p>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={isSavingToSandbox}
-                    onClick={() => void saveToSandbox()}
-                    className="shrink-0 rounded-lg border border-violet-300/30 bg-violet-300/10 px-3 py-1.5 text-xs font-semibold text-violet-100 transition hover:bg-violet-300/20 disabled:cursor-wait disabled:opacity-65"
-                  >
-                    {isSavingToSandbox ? "Saving…" : "Save to sandbox"}
-                  </button>
-                </div>
-                {sandboxMessage && <p className="mt-2 text-[11px] leading-relaxed text-violet-100">{sandboxMessage}</p>}
-              </div>
-            )}
           </div>
         ) : (
           <button
@@ -487,6 +439,8 @@ export function SutraWorkspace() {
                   <span>{edge.source_page ? `Page ${edge.source_page}` : "Page unavailable"}</span>
                   <span className="text-slate-700">•</span>
                   <span>{edge.confidence} confidence</span>
+                  <span className="text-slate-700">•</span>
+                  <span>{verificationTierLabel[verificationTiers[edgeIdentity(edge)] ?? "machine_validated"]}</span>
                   {edge.risk_flag && (
                     <>
                       <span className="text-slate-700">•</span>
@@ -501,7 +455,7 @@ export function SutraWorkspace() {
       )}
 
       <div className="absolute bottom-5 right-20 z-10 rounded-full border border-white/10 bg-slate-950/70 px-3 py-1.5 text-[10px] font-medium text-slate-500 backdrop-blur-xl">
-        {companyId ? "Verified static report data" : "Live report analysis"}
+        {companyId ? "Verified ledger data" : "Live report analysis"}
       </div>
     </main>
   );

@@ -1,9 +1,11 @@
 import { eq } from "drizzle-orm";
 
 import { claims, companies, documents, entities } from "./schema";
+import { entityMerges } from "./schema";
 import { loadStaticGraphFiles } from "./static-graphs";
 import { requiredDirectUrl } from "./env";
 import { createDatabaseClient } from "../lib/db/client";
+import { resolveEntity } from "../lib/domain/entity-resolution";
 
 type VerificationRow = {
   company: string;
@@ -93,18 +95,20 @@ async function main() {
       }
     }
 
-    const [allCompanies, allDocuments, allEntities, allClaims] = await Promise.all([
+    const [allCompanies, allDocuments, allEntities, allClaims, allMerges] = await Promise.all([
       db.select().from(companies),
       db.select().from(documents),
       db.select().from(entities),
       db.select().from(claims),
+      db.select().from(entityMerges),
     ]);
     const documentsByEntity = new Map<string, Set<string>>();
     for (const claim of allClaims) {
       for (const entityId of [claim.sourceEntityId, claim.targetEntityId]) {
-        const entityDocuments = documentsByEntity.get(entityId) ?? new Set<string>();
+        const resolvedEntityId = resolveEntity(entityId, allMerges);
+        const entityDocuments = documentsByEntity.get(resolvedEntityId) ?? new Set<string>();
         entityDocuments.add(claim.documentId);
-        documentsByEntity.set(entityId, entityDocuments);
+        documentsByEntity.set(resolvedEntityId, entityDocuments);
       }
     }
     const multiDocumentEntities = [...documentsByEntity.values()].filter(

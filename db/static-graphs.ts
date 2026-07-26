@@ -27,6 +27,7 @@ export type StaticGraph = {
   agency: string | null;
   nodes: StaticNode[];
   edges: StaticEdge[];
+  key_risks: string[];
 };
 
 export type StaticGraphFile = {
@@ -117,6 +118,9 @@ function parseGraph(value: unknown, fileName: string): StaticGraph {
 
   const nodes = value.nodes.map((node, index) => parseNode(node, fileName, index));
   const edges = value.edges.map((edge, index) => parseEdge(edge, fileName, index));
+  if (!Array.isArray(value.key_risks) || value.key_risks.some((risk) => typeof risk !== "string")) {
+    throw new Error(`${fileName}: key_risks must be an array of strings.`);
+  }
   const nodeIds = new Set(nodes.map((node) => node.id));
 
   if (nodeIds.size !== nodes.length) throw new Error(`${fileName}: node ids must be unique.`);
@@ -133,6 +137,7 @@ function parseGraph(value: unknown, fileName: string): StaticGraph {
     agency: nullableString(value.agency, `${fileName}: agency`),
     nodes,
     edges,
+    key_risks: value.key_risks as string[],
   };
 }
 

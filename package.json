@@ -4,11 +4,9 @@
   "private": true,
   "scripts": {
     "static:check": "node scripts/check-static-graphs.mjs",
-    "company:manifest": "node scripts/build-company-manifest.mjs",
-    "corpus:index": "node scripts/build-corpus-index.mjs",
-    "predev": "npm run static:check && npm run company:manifest && npm run corpus:index",
+    "predev": "npm run static:check",
     "dev": "next dev",
-    "prebuild": "npm run static:check && npm run company:manifest && npm run corpus:index",
+    "prebuild": "npm run static:check",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
@@ -19,7 +17,11 @@
     "db:smoke": "tsx db/smoke.ts",
     "db:import": "tsx db/import-static.ts",
     "db:verify-import": "tsx db/verify-import.ts",
-    "test:entity-normalization": "tsx --test lib/entity-normalization.test.ts"
+    "db:backfill-static-metadata": "tsx db/backfill-static-metadata.ts",
+    "db:seed-aliases": "tsx db/seed-aliases.ts",
+    "verify:parity": "tsx scripts/verify-ui-parity.mjs",
+    "test:entity-normalization": "tsx --test lib/entity-normalization.test.ts",
+    "test:domain": "tsx --test lib/domain/*.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
