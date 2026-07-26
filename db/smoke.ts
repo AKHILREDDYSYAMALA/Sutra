@@ -1,0 +1,264 @@
+import assert from "node:assert/strict";
+
+import { eq } from "drizzle-orm";
+
+import {
+  claims,
+  companies,
+  documents,
+  entities,
+  eventEntities,
+  events,
+  users,
+  watchlists,
+} from "./schema";
+import { requiredDirectUrl } from "./env";
+import { createDatabaseClient } from "../lib/db/client";
+
+class SmokeRollback extends Error {}
+
+async function expectConstraint(
+  label: string,
+  action: () => Promise<unknown>,
+): Promise<void> {
+  let error: unknown;
+
+  try {
+    await action();
+  } catch (caught) {
+    error = caught;
+  }
+
+  assert.ok(error, `${label} should have been rejected by the database`);
+}
+
+async function smoke() {
+  const { client, db } = createDatabaseClient(requiredDirectUrl());
+  let rolledBack = false;
+
+  try {
+    await db.transaction(async (tx) => {
+      const [user] = await tx
+        .insert(users)
+        .values({ email: "ledger-smoke@example.test" })
+        .returning();
+      assert.ok(user);
+
+      const [company] = await tx
+        .insert(companies)
+        .values({
+          name: "Ledger Smoke Industries Limited",
+          slug: "ledger-smoke-industries",
+          nseSymbol: "SMOKE",
+          sector: "Industrials",
+        })
+        .returning();
+      assert.ok(company);
+
+      const [sourceEntity] = await tx
+        .insert(entities)
+        .values({
+          canonicalName: company.name,
+          normalizedName: "ledger smoke industries",
+          entityType: "company",
+          isListed: true,
+          companyId: company.id,
+        })
+        .returning();
+      assert.ok(sourceEntity);
+
+      const [targetEntity] = await tx
+        .insert(entities)
+        .values({
+          canonicalName: "Smoke Test Customer Private Limited",
+          normalizedName: "smoke test customer",
+          entityType: "company",
+        })
+        .returning();
+      assert.ok(targetEntity);
+
+      const [document] = await tx
+        .insert(documents)
+        .values({
+          companyId: company.id,
+          source: "manual",
+          docType: "rating_rationale",
+          title: "Ledger smoke document",
+          url: "https://example.test/ledger-smoke.pdf",
+          sha256: "a".repeat(64),
+          publishedDate: "2026-07-26",
+        })
+        .returning();
+      assert.ok(document);
+
+      for (const status of [
+        "fetched",
+        "classified",
+        "extracted",
+        "validated",
+        "resolved",
+        "ready_for_review",
+        "published",
+      ] as const) {
+        const [advanced] = await tx
+          .update(documents)
+          .set({ status })
+          .where(eq(documents.id, document.id))
+          .returning();
+        assert.equal(advanced?.status, status);
+      }
+
+      const claimValues = {
+        documentId: document.id,
+        companyId: company.id,
+        sourceEntityId: sourceEntity.id,
+        targetEntityId: targetEntity.id,
+        relationType: "customer",
+        relationLabel: "Top customer, 35% of revenue",
+        exposurePct: "35.00",
+        riskFlag: "high",
+        quote: "The top customer contributed 35% of revenue during the year.",
+        page: 4,
+        observedDate: "2026-07-26",
+        verificationTier: "machine_validated",
+        extractionConfidence: "high",
+        modelVersion: "smoke-model-v1",
+        promptVersion: "smoke-prompt-v1",
+      } as const;
+
+      const [originalClaim] = await tx
+        .insert(claims)
+        .values(claimValues)
+        .returning();
+      assert.ok(originalClaim);
+
+      const [replacementClaim] = await tx
+        .insert(claims)
+        .values({
+          ...claimValues,
+          quote: "The top customer contributed 34% of revenue during the year.",
+          exposurePct: "34.00",
+        })
+        .returning();
+      assert.ok(replacementClaim);
+
+      const [supersededClaim] = await tx
+        .update(claims)
+        .set({
+          lifecycleState: "superseded",
+          supersededByClaimId: replacementClaim.id,
+        })
+        .where(eq(claims.id, originalClaim.id))
+        .returning();
+      assert.equal(supersededClaim?.supersededByClaimId, replacementClaim.id);
+      assert.equal(supersededClaim?.lifecycleState, "superseded");
+
+      const [event] = await tx
+        .insert(events)
+        .values({
+          headline: "Smoke event is separate from the claims ledger",
+          url: "https://example.test/smoke-news",
+          source: "smoke-test",
+          publishedAt: new Date("2026-07-26T00:00:00Z"),
+        })
+        .returning();
+      assert.ok(event);
+
+      await tx.insert(eventEntities).values({
+        eventId: event.id,
+        entityId: targetEntity.id,
+        linkConfidence: "0.95",
+      });
+
+      await expectConstraint("invalid verification tier", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint.insert(claims).values({
+            ...claimValues,
+            quote: "This tier is intentionally invalid.",
+            verificationTier: "untrusted",
+          });
+        }),
+      );
+
+      await expectConstraint("excluded claim without an exclusion reason", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint.insert(claims).values({
+            ...claimValues,
+            quote: "This exclusion reason is intentionally missing.",
+            verificationTier: "excluded",
+            exclusionReason: null,
+          });
+        }),
+      );
+
+      await expectConstraint("exposure percentage above 100", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint.insert(claims).values({
+            ...claimValues,
+            quote: "This exposure is intentionally invalid.",
+            exposurePct: "100.01",
+          });
+        }),
+      );
+
+      await expectConstraint("watchlist with both target ids", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint.insert(watchlists).values({
+            userId: user.id,
+            watchType: "company",
+            companyId: company.id,
+            entityId: targetEntity.id,
+          });
+        }),
+      );
+
+      await expectConstraint("duplicate document sha256", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint.insert(documents).values({
+            companyId: company.id,
+            source: "manual",
+            url: "https://example.test/duplicate.pdf",
+            sha256: document.sha256,
+          });
+        }),
+      );
+
+      await expectConstraint("invalid transition from published document", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint
+            .update(documents)
+            .set({ status: "fetched" })
+            .where(eq(documents.id, document.id));
+        }),
+      );
+
+      await expectConstraint("claim substance update", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint
+            .update(claims)
+            .set({ quote: "Claims must not be mutable." })
+            .where(eq(claims.id, originalClaim.id));
+        }),
+      );
+
+      // The entire fixture is intentionally discarded after all assertions pass.
+      throw new SmokeRollback();
+    });
+  } catch (error) {
+    if (error instanceof SmokeRollback) {
+      rolledBack = true;
+    } else {
+      throw error;
+    }
+  } finally {
+    await client.end({ timeout: 5 });
+  }
+
+  assert.equal(rolledBack, true, "smoke test transaction did not roll back");
+  console.log("db:smoke passed; transaction rolled back and the database is unchanged.");
+}
+
+smoke().catch((error: unknown) => {
+  console.error(error);
+  process.exitCode = 1;
+});
