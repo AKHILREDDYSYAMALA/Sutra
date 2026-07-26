@@ -75,7 +75,8 @@ export const documents = pgTable(
     source: text("source").notNull(),
     docType: text("doc_type"),
     title: text("title"),
-    url: text("url").notNull(),
+    // Static graph imports have local PDFs only; hosted source URLs arrive with ingestion.
+    url: text("url"),
     storagePath: text("storage_path"),
     sha256: text("sha256").notNull(),
     agency: text("agency"),
@@ -122,7 +123,8 @@ export const entities = pgTable(
     canonicalName: text("canonical_name").notNull(),
     normalizedName: text("normalized_name").notNull(),
     entityType: text("entity_type").notNull(),
-    country: text("country").notNull().default("IN"),
+    // Null denotes a clearly foreign entity whose precise country is not known yet.
+    country: text("country").default("IN"),
     isListed: boolean("is_listed").notNull().default(false),
     companyId: uuid("company_id").references(() => companies.id),
     createdAt: createdAt(),
