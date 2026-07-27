@@ -6,10 +6,10 @@ import { eq, sql } from "drizzle-orm";
 import { claims, companies, documents } from "@/db/schema";
 import { parseReportDate, slugify } from "@/db/static-graphs";
 import { advanceDocumentStatus, getDb, scheduleDocumentRetry, type DatabaseClient } from "@/lib/db";
-import { extract, extractPdfText, type ExtractedPdfText } from "@/lib/extraction/extract";
+import { extract, extractPdfText, type ExtractedDocument, type ExtractedPdfText } from "@/lib/extraction/extract";
 import { normalizeEntityName } from "@/lib/entity-normalization";
 
-import { classifyDocument } from "./classify";
+import { classifyDocument, collectClassificationSignals, type DocumentClassification, type DocumentType } from "./classify";
 import { resolveGraphEntities, relationTypeFor } from "./resolve-entities";
 import { downloadDocumentPdf, uploadDocumentPdf } from "./storage";
 
@@ -24,11 +24,19 @@ export type IngestDocumentInput = {
   fileBuffer?: Buffer;
   fileName?: string;
   title?: string;
-  docType?: "rating_rationale" | "rating_intimation" | "annual_report" | "rpt_schedule" | "order_win" | "drhp" | "other";
+  docType?: DocumentType;
+  /** Marks a forced type supplied by a human reclassification action. */
+  classificationOverride?: boolean;
   companyHint?: string;
   isPrivate?: boolean;
   /** Dependency injection for CLI and tests; runtime callers use DATABASE_URL. */
   db?: DatabaseClient;
+  /** Test/worker seam; production uses the shared extraction and Storage functions. */
+  services?: Partial<{
+    uploadDocumentPdf: typeof uploadDocumentPdf;
+    extractPdfText: typeof extractPdfText;
+    extract: (fileBuffer: Buffer, text?: ExtractedPdfText) => Promise<ExtractedDocument>;
+  }>;
 };
 
 export type IngestDocumentResult = {
@@ -56,7 +64,7 @@ export function sourceForUrl(url: string): IngestSource {
   if (host.includes("crisil")) return "crisil";
   if (host.includes("icra")) return "icra";
   if (host.includes("care")) return "care";
-  if (host.includes("indiaratings")) return "india_ratings";
+  if (host.includes("indiaratings") || host.includes("india-ratings") || host.includes("ind-ra")) return "india_ratings";
   if (host.includes("bseindia")) return "bse";
   if (host.includes("nseindia")) return "nse";
   return "manual";
@@ -144,6 +152,18 @@ function documentType(value: string | null): IngestDocumentInput["docType"] | un
   return value && documentTypes.has(value) ? value as NonNullable<IngestDocumentInput["docType"]> : undefined;
 }
 
+function suppliedClassification(input: IngestDocumentInput, text: ExtractedPdfText): DocumentClassification {
+  if (!input.docType) throw new Error("A supplied classification needs docType.");
+  const signals = collectClassificationSignals({ title: input.title, url: input.url, text: text.fullText });
+  return {
+    docType: input.docType,
+    confidence: "deterministic",
+    reason: input.classificationOverride ? "human classification override" : "document type supplied by caller",
+    decisionPath: input.classificationOverride ? "human_forced_type" : "caller_supplied_type",
+    signals,
+  };
+}
+
 async function createOrResumeDocument(
   db: DatabaseClient,
   input: IngestDocumentInput,
@@ -198,6 +218,9 @@ async function createOrResumeDocument(
  */
 export async function ingestDocument(input: IngestDocumentInput): Promise<IngestDocumentResult> {
   const db = input.db ?? getDb();
+  const uploadPdf = input.services?.uploadDocumentPdf ?? uploadDocumentPdf;
+  const extractText = input.services?.extractPdfText ?? extractPdfText;
+  const extractGraph = input.services?.extract ?? extract;
   const sourcePdf = await loadPdf(input);
   const sha256 = createHash("sha256").update(sourcePdf.bytes).digest("hex");
   const prepared = await createOrResumeDocument(db, input, sourcePdf, sha256);
@@ -219,18 +242,18 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
 
   try {
     if (stage === "discovered") {
-      const storagePath = await uploadDocumentPdf(sha256, sourcePdf.bytes);
+      const storagePath = await uploadPdf(sha256, sourcePdf.bytes);
       await db.update(documents).set({ storagePath, fetchedAt: new Date(), updatedAt: sql`now()` }).where(eq(documents.id, document.id));
       await advanceDocumentStatus(db, document.id, "fetched");
       stage = "fetched";
     }
 
     let text: ExtractedPdfText | undefined;
-    let classification: Awaited<ReturnType<typeof classifyDocument>>;
+    let classification: DocumentClassification;
     if (stage === "fetched") {
-      text = await extractPdfText(sourcePdf.bytes);
+      text = await extractText(sourcePdf.bytes);
       classification = input.docType
-        ? { docType: input.docType, confidence: "deterministic" as const, reason: "document type supplied by caller" }
+        ? suppliedClassification(input, text)
         : await classifyDocument({ title: document.title, url: document.url, text: text.fullText });
       await db.update(documents).set({
         docType: classification.docType,
@@ -242,8 +265,8 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     } else if (stage === "classified") {
       const savedType = documentType(document.docType);
       classification = savedType
-        ? { docType: savedType, confidence: "deterministic", reason: "resuming existing classification" }
-        : await classifyDocument({ title: document.title, url: document.url, text: (text = await extractPdfText(sourcePdf.bytes)).fullText });
+        ? suppliedClassification({ ...input, docType: savedType }, text ?? await extractPdfText(sourcePdf.bytes))
+        : await classifyDocument({ title: document.title, url: document.url, text: (text = await extractText(sourcePdf.bytes)).fullText });
     } else {
       throw new Error(`Document ${document.id} cannot be resumed from status ${stage}.`);
     }
@@ -254,7 +277,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
       return { outcome: "excluded", documentId: document.id, sha256, status: "excluded", claimCount: 0, excludedCount: 0, company: null, docType: classification.docType, resumedFrom: prepared.resumedFrom, reason: classification.reason };
     }
 
-    const extracted = await extract(sourcePdf.bytes, text ?? await extractPdfText(sourcePdf.bytes));
+    const extracted = await extractGraph(sourcePdf.bytes, text ?? await extractText(sourcePdf.bytes));
     await advanceDocumentStatus(db, document.id, "extracted");
     await db.update(documents).set({
       metadata: { ...documentMetadata(document.metadata), classification, excluded: extracted.meta.excluded },
@@ -324,7 +347,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
 }
 
 /** Explicitly resumes an incomplete document without creating or deleting rows. */
-export async function retryDocument(input: { db?: DatabaseClient; documentId: string }): Promise<IngestDocumentResult> {
+export async function retryDocument(input: { db?: DatabaseClient; documentId: string; forceType?: DocumentType }): Promise<IngestDocumentResult> {
   const db = input.db ?? getDb();
   const [document] = await db.select().from(documents).where(eq(documents.id, input.documentId)).limit(1);
   if (!document) throw new Error(`Document ${input.documentId} was not found.`);
@@ -332,11 +355,12 @@ export async function retryDocument(input: { db?: DatabaseClient; documentId: st
     throw new Error(`Document ${input.documentId} is '${document.status}' and is not retryable.`);
   }
   const source = document.source as IngestSource;
-  const docType = documentType(document.docType);
-  if (document.url) return ingestDocument({ db, source, url: document.url, title: document.title ?? undefined, docType });
+  const docType = input.forceType ?? documentType(document.docType);
+  const classificationOverride = Boolean(input.forceType);
+  if (document.url) return ingestDocument({ db, source, url: document.url, title: document.title ?? undefined, docType, classificationOverride });
   if (document.storagePath) {
     const fileBuffer = await downloadDocumentPdf(document.storagePath);
-    return ingestDocument({ db, source, fileBuffer, fileName: document.title ?? undefined, docType });
+    return ingestDocument({ db, source, fileBuffer, fileName: document.title ?? undefined, docType, classificationOverride });
   }
   throw new Error(`Document ${input.documentId} has neither a source URL nor a stored PDF; retry it with --file <path>.`);
 }

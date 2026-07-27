@@ -25,6 +25,7 @@
     "ingest": "tsx db/ingest.ts",
     "ingest:status": "tsx db/ingest-status.ts",
     "ingest:abandon": "tsx db/ingest-abandon.ts",
+    "ingest:reclassify": "tsx db/ingest-reclassify.ts",
     "test:ingestion": "tsx --test lib/ingestion/*.test.ts",
     "verify:parity": "tsx scripts/verify-ui-parity.mjs",
     "test:entity-normalization": "tsx --test lib/entity-normalization.test.ts",

@@ -14,7 +14,8 @@ import {
   watchlists,
 } from "./schema";
 import { requiredDirectUrl } from "./env";
-import { createDatabaseClient } from "../lib/db/client";
+import { createDatabaseClient, type DatabaseClient } from "../lib/db/client";
+import { ingestDocument } from "../lib/ingestion/ingest";
 
 class SmokeRollback extends Error {}
 
@@ -317,6 +318,30 @@ async function smoke() {
         .returning();
       assert.equal(resumedDocument?.status, "discovered", "a failed document can resume from discovery");
 
+      const [excludedDocument] = await tx
+        .insert(documents)
+        .values({
+          companyId: company.id,
+          source: "manual",
+          url: "https://example.test/reclassifiable.pdf",
+          sha256: "c".repeat(64),
+          status: "discovered",
+        })
+        .returning();
+      assert.ok(excludedDocument);
+      const [excluded] = await tx
+        .update(documents)
+        .set({ status: "excluded", lastError: "classifier outcome" })
+        .where(eq(documents.id, excludedDocument.id))
+        .returning();
+      assert.equal(excluded?.status, "excluded");
+      const [reclassifiedDocument] = await tx
+        .update(documents)
+        .set({ status: "discovered", lastError: null })
+        .where(eq(documents.id, excludedDocument.id))
+        .returning();
+      assert.equal(reclassifiedDocument?.status, "discovered", "an excluded document can be reclassified from discovery");
+
       await expectConstraint("claim substance update", () =>
         tx.transaction(async (savepoint) => {
           await savepoint
@@ -325,6 +350,61 @@ async function smoke() {
             .where(eq(claims.id, originalClaim.id));
         }),
       );
+
+      // Fixture regression: an India Ratings rationale may open with an upgrade
+      // intimation, but its analytical headings must reach machine-claim review.
+      const olectraText = `[[PAGE 1]]
+India Ratings and Research (Ind-Ra) has upgraded Olectra Greentech Limited's (OGL) bank loan facilities long-term rating to 'IND A' from 'IND A-'.
+Analytical Approach
+Detailed Rationale of the Rating Action
+List of Key Rating Drivers
+Detailed Description of Key Rating Drivers
+Liquidity
+Rating Sensitivities
+About the Company
+Key Financial Indicators
+Rating History
+Bank wise Facilities Details
+Olectra's top customer contributed 42% of revenue.`;
+      const olectraResult = await ingestDocument({
+        db: tx as unknown as DatabaseClient,
+        source: "india_ratings",
+        title: "India Ratings Upgrades Olectra Greentech",
+        fileBuffer: Buffer.from("%PDF-fixture"),
+        services: {
+          uploadDocumentPdf: async (sha256) => `${sha256}.pdf`,
+          extractPdfText: async () => ({ fullText: olectraText, textForModel: olectraText }),
+          extract: async (_buffer, text) => ({
+            graph: {
+              target_company: "Olectra Greentech Limited",
+              rating: "IND A/Stable",
+              report_date: "May 22, 2026",
+              agency: "India Ratings",
+              nodes: [
+                { id: "olectra", label: "Olectra Greentech Limited", type: "target", named: true },
+                { id: "top-customer", label: "Named Top Customer", type: "customer", named: true },
+              ],
+              edges: [{ source: "olectra", target: "top-customer", relation: "Top customer, 42% of revenue", exposure_pct: 42, risk_flag: "high", source_quote: "Olectra's top customer contributed 42% of revenue.", source_page: 1, confidence: "high" }],
+              key_risks: ["Customer concentration."],
+            },
+            meta: { excluded: [] },
+            modelVersion: "fixture-model",
+            promptVersion: "fixture-prompt",
+            text: text!,
+          }),
+        },
+      });
+      assert.equal(olectraResult.status, "ready_for_review");
+      assert.equal(olectraResult.claimCount, 1);
+      const [olectraDocument] = await tx.select().from(documents).where(eq(documents.id, olectraResult.documentId));
+      assert.equal(olectraDocument?.source, "india_ratings");
+      assert.equal(olectraDocument?.status, "ready_for_review");
+      const metadata = olectraDocument?.metadata as { classification?: { docType?: string; signals?: { rationaleSubstanceHeadings?: string[] } } };
+      assert.equal(metadata.classification?.docType, "rating_rationale");
+      assert.ok(metadata.classification?.signals?.rationaleSubstanceHeadings?.includes("Detailed Rationale of the Rating Action"));
+      const olectraClaims = await tx.select().from(claims).where(eq(claims.documentId, olectraResult.documentId));
+      assert.equal(olectraClaims.length, 1);
+      assert.equal(olectraClaims[0]?.verificationTier, "machine_validated");
 
       // The entire fixture is intentionally discarded after all assertions pass.
       throw new SmokeRollback();

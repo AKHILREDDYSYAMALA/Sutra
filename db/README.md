@@ -78,6 +78,13 @@ and `failed` documents resume their existing audit row instead. Use
 `npm run ingest:abandon -- --id <documentId>` to record a failed abandonment;
 none of these commands delete rows.
 
+If a classifier fix changes an `excluded` decision, run
+`npm run ingest:reclassify -- --id <documentId>`. It resets only that row to
+`discovered` and re-runs the normal pipeline. `--force-type rating_rationale`
+records a human classification override in document metadata before rerunning;
+it is not an automatic publish path. Use `--source india_ratings` when a local
+India Ratings/Ind-Ra file was originally ingested as `manual`.
+
 ## Resolved claims view
 
 `claims_resolved` is the default SQL surface for merge-aware analytics. It

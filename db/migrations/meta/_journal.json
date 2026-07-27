@@ -43,6 +43,13 @@
       "when": 1785264000000,
       "tag": "0005_retry_failed_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785350400000,
+      "tag": "0006_reclassify_excluded_documents",
+      "breakpoints": true
     }
   ]
 }
