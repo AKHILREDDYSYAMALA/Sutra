@@ -36,6 +36,13 @@
       "when": 1785177600000,
       "tag": "0004_review_claim_metadata",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785264000000,
+      "tag": "0005_retry_failed_documents",
+      "breakpoints": true
     }
   ]
 }

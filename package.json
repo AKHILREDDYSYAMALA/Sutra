@@ -23,6 +23,9 @@
     "db:entity-review": "tsx db/entity-review.ts",
     "db:merge-entities": "tsx db/merge-entities.ts",
     "ingest": "tsx db/ingest.ts",
+    "ingest:status": "tsx db/ingest-status.ts",
+    "ingest:abandon": "tsx db/ingest-abandon.ts",
+    "test:ingestion": "tsx --test lib/ingestion/*.test.ts",
     "verify:parity": "tsx scripts/verify-ui-parity.mjs",
     "test:entity-normalization": "tsx --test lib/entity-normalization.test.ts",
     "test:domain": "tsx --test lib/domain/*.test.ts"

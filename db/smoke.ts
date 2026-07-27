@@ -294,6 +294,29 @@ async function smoke() {
         }),
       );
 
+      const [retryableDocument] = await tx
+        .insert(documents)
+        .values({
+          companyId: company.id,
+          source: "manual",
+          url: "https://example.test/retryable.pdf",
+          sha256: "b".repeat(64),
+        })
+        .returning();
+      assert.ok(retryableDocument);
+      const [failedDocument] = await tx
+        .update(documents)
+        .set({ status: "failed", lastError: "temporary storage failure" })
+        .where(eq(documents.id, retryableDocument.id))
+        .returning();
+      assert.equal(failedDocument?.status, "failed");
+      const [resumedDocument] = await tx
+        .update(documents)
+        .set({ status: "discovered", lastError: null })
+        .where(eq(documents.id, retryableDocument.id))
+        .returning();
+      assert.equal(resumedDocument?.status, "discovered", "a failed document can resume from discovery");
+
       await expectConstraint("claim substance update", () =>
         tx.transaction(async (savepoint) => {
           await savepoint

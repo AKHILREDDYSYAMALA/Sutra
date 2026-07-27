@@ -11,7 +11,7 @@ import { normalizeEntityName } from "@/lib/entity-normalization";
 
 import { classifyDocument } from "./classify";
 import { resolveGraphEntities, relationTypeFor } from "./resolve-entities";
-import { uploadDocumentPdf } from "./storage";
+import { downloadDocumentPdf, uploadDocumentPdf } from "./storage";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 30_000;
@@ -40,6 +40,7 @@ export type IngestDocumentResult = {
   excludedCount: number;
   company: string | null;
   docType: string | null;
+  resumedFrom?: string;
   reason?: string;
 };
 
@@ -136,20 +137,48 @@ function documentMetadata(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-/**
- * Persistent ingestion entrypoint. Each successful stage transition is written to
- * the ledger; terminal documents are never automatically published.
- */
-export async function ingestDocument(input: IngestDocumentInput): Promise<IngestDocumentResult> {
-  const db = input.db ?? getDb();
-  const sourcePdf = await loadPdf(input);
-  const sha256 = createHash("sha256").update(sourcePdf.bytes).digest("hex");
+const resumableDocumentStatuses = new Set(["discovered", "fetched", "classified", "failed"]);
+const documentTypes = new Set(["rating_rationale", "rating_intimation", "annual_report", "rpt_schedule", "order_win", "drhp", "other"]);
+
+function documentType(value: string | null): IngestDocumentInput["docType"] | undefined {
+  return value && documentTypes.has(value) ? value as NonNullable<IngestDocumentInput["docType"]> : undefined;
+}
+
+async function createOrResumeDocument(
+  db: DatabaseClient,
+  input: IngestDocumentInput,
+  sourcePdf: PdfInput,
+  sha256: string,
+) {
   const [existing] = await db.select().from(documents).where(eq(documents.sha256, sha256)).limit(1);
-  if (existing) {
-    return { outcome: "duplicate", documentId: existing.id, sha256, status: existing.status, claimCount: 0, excludedCount: 0, company: null, docType: existing.docType, reason: "A document with this SHA-256 already exists." };
+  if (existing && !resumableDocumentStatuses.has(existing.status)) {
+    return {
+      duplicate: true as const,
+      document: existing,
+      resumedFrom: undefined,
+    };
   }
 
-  const [document] = await db.insert(documents).values({
+  if (existing) {
+    const resumedFrom = existing.status;
+    const [resumed] = await db
+      .update(documents)
+      .set({
+        // `failed` is auditable but explicitly retryable from discovery. Earlier
+        // stages retain their completed work and continue at the next stage.
+        status: existing.status === "failed" ? "discovered" : existing.status,
+        attempts: sql`${documents.attempts} + 1`,
+        lastError: null,
+        nextAttemptAt: null,
+        updatedAt: sql`now()`,
+      })
+      .where(eq(documents.id, existing.id))
+      .returning();
+    if (!resumed) throw new Error(`Could not resume document ${existing.id}.`);
+    return { duplicate: false as const, document: resumed, resumedFrom };
+  }
+
+  const [created] = await db.insert(documents).values({
     source: input.source,
     title: input.title ?? sourcePdf.title,
     url: sourcePdf.url,
@@ -159,31 +188,73 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     isPrivate: input.isPrivate ?? input.source === "user_upload",
     metadata: { ingestion: { source: sourcePdf.url ? "url" : "file" } },
   }).returning();
-  if (!document) throw new Error("Document creation did not return a row.");
+  if (!created) throw new Error("Document creation did not return a row.");
+  return { duplicate: false as const, document: created, resumedFrom: undefined };
+}
+
+/**
+ * Persistent ingestion entrypoint. Each successful stage transition is written to
+ * the ledger; terminal documents are never automatically published.
+ */
+export async function ingestDocument(input: IngestDocumentInput): Promise<IngestDocumentResult> {
+  const db = input.db ?? getDb();
+  const sourcePdf = await loadPdf(input);
+  const sha256 = createHash("sha256").update(sourcePdf.bytes).digest("hex");
+  const prepared = await createOrResumeDocument(db, input, sourcePdf, sha256);
+  if (prepared.duplicate) {
+    return {
+      outcome: "duplicate",
+      documentId: prepared.document.id,
+      sha256,
+      status: prepared.document.status,
+      claimCount: 0,
+      excludedCount: 0,
+      company: null,
+      docType: prepared.document.docType,
+      reason: `Duplicate: document already has durable work at status '${prepared.document.status}'.`,
+    };
+  }
+  const document = prepared.document;
+  let stage = document.status;
 
   try {
-    const storagePath = await uploadDocumentPdf(sha256, sourcePdf.bytes);
-    await db.update(documents).set({ storagePath, fetchedAt: new Date(), updatedAt: sql`now()` }).where(eq(documents.id, document.id));
-    await advanceDocumentStatus(db, document.id, "fetched");
+    if (stage === "discovered") {
+      const storagePath = await uploadDocumentPdf(sha256, sourcePdf.bytes);
+      await db.update(documents).set({ storagePath, fetchedAt: new Date(), updatedAt: sql`now()` }).where(eq(documents.id, document.id));
+      await advanceDocumentStatus(db, document.id, "fetched");
+      stage = "fetched";
+    }
 
-    const text: ExtractedPdfText = await extractPdfText(sourcePdf.bytes);
-    const classification = input.docType
-      ? { docType: input.docType, confidence: "deterministic" as const, reason: "document type supplied by caller" }
-      : await classifyDocument({ title: document.title, url: document.url, text: text.fullText });
-    await db.update(documents).set({
-      docType: classification.docType,
-      metadata: { ...documentMetadata(document.metadata), classification },
-      updatedAt: sql`now()`,
-    }).where(eq(documents.id, document.id));
-    await advanceDocumentStatus(db, document.id, "classified");
+    let text: ExtractedPdfText | undefined;
+    let classification: Awaited<ReturnType<typeof classifyDocument>>;
+    if (stage === "fetched") {
+      text = await extractPdfText(sourcePdf.bytes);
+      classification = input.docType
+        ? { docType: input.docType, confidence: "deterministic" as const, reason: "document type supplied by caller" }
+        : await classifyDocument({ title: document.title, url: document.url, text: text.fullText });
+      await db.update(documents).set({
+        docType: classification.docType,
+        metadata: { ...documentMetadata(document.metadata), classification },
+        updatedAt: sql`now()`,
+      }).where(eq(documents.id, document.id));
+      await advanceDocumentStatus(db, document.id, "classified");
+      stage = "classified";
+    } else if (stage === "classified") {
+      const savedType = documentType(document.docType);
+      classification = savedType
+        ? { docType: savedType, confidence: "deterministic", reason: "resuming existing classification" }
+        : await classifyDocument({ title: document.title, url: document.url, text: (text = await extractPdfText(sourcePdf.bytes)).fullText });
+    } else {
+      throw new Error(`Document ${document.id} cannot be resumed from status ${stage}.`);
+    }
 
     if (classification.docType !== "rating_rationale") {
       await advanceDocumentStatus(db, document.id, "excluded");
       await db.update(documents).set({ lastError: classification.reason, updatedAt: sql`now()` }).where(eq(documents.id, document.id));
-      return { outcome: "excluded", documentId: document.id, sha256, status: "excluded", claimCount: 0, excludedCount: 0, company: null, docType: classification.docType, reason: classification.reason };
+      return { outcome: "excluded", documentId: document.id, sha256, status: "excluded", claimCount: 0, excludedCount: 0, company: null, docType: classification.docType, resumedFrom: prepared.resumedFrom, reason: classification.reason };
     }
 
-    const extracted = await extract(sourcePdf.bytes, text);
+    const extracted = await extract(sourcePdf.bytes, text ?? await extractPdfText(sourcePdf.bytes));
     await advanceDocumentStatus(db, document.id, "extracted");
     await db.update(documents).set({
       metadata: { ...documentMetadata(document.metadata), classification, excluded: extracted.meta.excluded },
@@ -240,7 +311,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     });
     await advanceDocumentStatus(db, document.id, "resolved");
     await advanceDocumentStatus(db, document.id, "ready_for_review");
-    return { outcome: "ready_for_review", documentId: document.id, sha256, status: "ready_for_review", claimCount, excludedCount: extracted.meta.excluded.length, company: company.name, docType: classification.docType };
+    return { outcome: "ready_for_review", documentId: document.id, sha256, status: "ready_for_review", claimCount, excludedCount: extracted.meta.excluded.length, company: company.name, docType: classification.docType, resumedFrom: prepared.resumedFrom };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Sutra document ingestion failed", { documentId: document.id, sha256, message });
@@ -250,4 +321,22 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     await scheduleDocumentRetry(db, document.id, message.slice(0, 2_000));
     throw error;
   }
+}
+
+/** Explicitly resumes an incomplete document without creating or deleting rows. */
+export async function retryDocument(input: { db?: DatabaseClient; documentId: string }): Promise<IngestDocumentResult> {
+  const db = input.db ?? getDb();
+  const [document] = await db.select().from(documents).where(eq(documents.id, input.documentId)).limit(1);
+  if (!document) throw new Error(`Document ${input.documentId} was not found.`);
+  if (!resumableDocumentStatuses.has(document.status)) {
+    throw new Error(`Document ${input.documentId} is '${document.status}' and is not retryable.`);
+  }
+  const source = document.source as IngestSource;
+  const docType = documentType(document.docType);
+  if (document.url) return ingestDocument({ db, source, url: document.url, title: document.title ?? undefined, docType });
+  if (document.storagePath) {
+    const fileBuffer = await downloadDocumentPdf(document.storagePath);
+    return ingestDocument({ db, source, fileBuffer, fileName: document.title ?? undefined, docType });
+  }
+  throw new Error(`Document ${input.documentId} has neither a source URL nor a stored PDF; retry it with --file <path>.`);
 }

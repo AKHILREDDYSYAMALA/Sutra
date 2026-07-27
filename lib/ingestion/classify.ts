@@ -14,8 +14,10 @@ const ANNUAL = /\bannual report\b/i;
 const RPT = /\brelated party transaction|rpt schedule\b/i;
 const ORDER = /\b(?:order win|order received|letter of award)\b/i;
 const DRHP = /\b(?:draft red herring prospectus|drhp)\b/i;
+const EARNINGS_CALL_TRANSCRIPT = /\b(?:earnings|investor|results)\s+(?:call|conference call|transcript)\b|\b(?:analyst|participant)\s+(?:q&a|questions?)\b/i;
 
 function ruleBasedClassification(value: string): DocumentClassification | null {
+  if (EARNINGS_CALL_TRANSCRIPT.test(value)) return { docType: "other", confidence: "deterministic", reason: "earnings-call transcript, not a credit rating rationale" };
   if (RATIONALE.test(value)) return { docType: "rating_rationale", confidence: "deterministic", reason: "rating rationale language found" };
   if (RATING_INTIMATION.test(value)) return { docType: "rating_intimation", confidence: "deterministic", reason: "rating intimation language found" };
   if (ANNUAL.test(value)) return { docType: "annual_report", confidence: "deterministic", reason: "annual report language found" };

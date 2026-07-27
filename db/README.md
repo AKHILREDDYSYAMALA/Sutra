@@ -70,6 +70,14 @@ can approve/reject claims and publish a document. Public reads continue to
 select only `documents.status = 'published'` and non-excluded verification
 tiers.
 
+An existing hash is a true duplicate only once the document is at `extracted` or
+beyond (or in another terminal outcome). `discovered`, `fetched`, `classified`,
+and `failed` documents resume their existing audit row instead. Use
+`npm run ingest -- --retry <documentId>` for an explicit retry,
+`npm run ingest:status` to list all non-published/non-excluded documents, and
+`npm run ingest:abandon -- --id <documentId>` to record a failed abandonment;
+none of these commands delete rows.
+
 ## Resolved claims view
 
 `claims_resolved` is the default SQL surface for merge-aware analytics. It
