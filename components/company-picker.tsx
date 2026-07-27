@@ -48,6 +48,7 @@ export function CompanyList({ companies, selectedId, onSelect }: CompanyListProp
                 <span className="mt-0.5 block truncate text-[9px] font-medium text-slate-500" title={formatRating(company.graph.rating, company.agency)}>
                   {formatRating(company.graph.rating, company.agency)}
                 </span>
+                <span className="mt-1 block text-[9px] font-medium text-emerald-200/80">{company.graph.edges.length} claims · {company.verificationSummary.machineValidated === 0 ? "all human-verified" : `${company.verificationSummary.humanVerified} human-verified, ${company.verificationSummary.machineValidated} machine-validated`}</span>
               </span>
               <span className="shrink-0 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-slate-400" title={agencyLabel(company.agency)}>
                 {company.agency ?? "—"}

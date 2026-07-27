@@ -23,6 +23,7 @@ export type CorpusRelationship = {
   source_quote: string;
   source_page: number | null;
   confidence: "high" | "medium";
+  verification_tier: "human_verified" | "machine_validated" | "excluded";
 };
 
 export type CorpusEntity = {
@@ -109,6 +110,7 @@ function relationshipFor(entity: GraphNode, counterparty: GraphNode, ledger: Led
     source_quote: claim.quote,
     source_page: claim.page,
     confidence: claim.extractionConfidence === "medium" ? "medium" : "high",
+    verification_tier: claim.verificationTier,
   };
 }
 
@@ -203,6 +205,7 @@ export function getGraphRelationshipsForEntity(graph: GraphData, entityId: strin
       source_quote: edge.source_quote,
       source_page: edge.source_page,
       confidence: edge.confidence,
+      verification_tier: "machine_validated",
     }];
   });
 }

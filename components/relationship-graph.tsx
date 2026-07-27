@@ -17,6 +17,7 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { getCorpusReportCount, type CorpusIndex } from "@/lib/domain/corpus";
+import { edgeIdentity } from "@/lib/domain/graph";
 import type { GraphData, GraphEdge, GraphNode } from "@/lib/graph-data";
 
 type SutraNodeData = {
@@ -151,16 +152,17 @@ function toFlowNodes(graph: GraphData, corpus: CorpusIndex, highlightedNodeIds: 
   }));
 }
 
-function edgeIdentity(edge: GraphEdge) {
-  return `${edge.source}\u0000${edge.target}\u0000${edge.relation}\u0000${edge.source_quote}`;
-}
-
-function toFlowEdges(graph: GraphData, highlightedEdgeIds: Set<string>): SutraFlowEdge[] {
+function toFlowEdges(
+  graph: GraphData,
+  highlightedEdgeIds: Set<string>,
+  verificationTiers: Record<string, "human_verified" | "machine_validated" | "excluded">,
+): SutraFlowEdge[] {
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
   return graph.edges.filter((edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)).map((edge, index) => {
     const isHighRisk = edge.risk_flag === "high";
     const isMediumRisk = edge.risk_flag === "medium";
     const highlighted = highlightedEdgeIds.has(edgeIdentity(edge));
+    const machineValidated = verificationTiers[edgeIdentity(edge)] === "machine_validated";
     return {
       id: `${edge.source}-${edge.target}-${index}`,
       source: edge.source,
@@ -173,6 +175,7 @@ function toFlowEdges(graph: GraphData, highlightedEdgeIds: Set<string>): SutraFl
       style: {
         stroke: highlighted ? "#67e8f9" : isHighRisk ? "#fb7185" : isMediumRisk ? "#fbbf24" : "#64748b",
         strokeWidth: highlighted ? 4.5 : isHighRisk ? 3.5 : 1.7,
+        strokeDasharray: machineValidated ? "7 5" : undefined,
       },
       labelStyle: { fill: isHighRisk ? "#fecdd3" : "#cbd5e1", fontSize: 10, fontWeight: 600 },
       labelBgStyle: { fill: "#0f172a", fillOpacity: 0.96 },
@@ -189,9 +192,12 @@ type RelationshipGraphProps = {
   panelState: GraphPanelState;
   corpus: CorpusIndex;
   highlightedEdges?: GraphEdge[];
+  verificationTiers?: Record<string, "human_verified" | "machine_validated" | "excluded">;
+  compact?: boolean;
 };
 
-function getSafeInsets(panelState: GraphPanelState) {
+function getSafeInsets(panelState: GraphPanelState, compact: boolean) {
+  if (compact) return { left: 22, right: 22, top: 22, bottom: 22 };
   const isNarrow = window.innerWidth < 1024;
 
   if (isNarrow) {
@@ -213,13 +219,17 @@ function getSafeInsets(panelState: GraphPanelState) {
   };
 }
 
-function PanelAwareViewport({ graphKey, panelState }: { graphKey: string; panelState: GraphPanelState }) {
+function PanelAwareViewport({ graphKey, panelState, compact = false }: { graphKey: string; panelState: GraphPanelState; compact?: boolean }) {
   const { getNodes, getNodesBounds, setViewport } = useReactFlow<SutraFlowNode, SutraFlowEdge>();
 
   const fitIntoSafeArea = useCallback(() => {
-    const insets = getSafeInsets(panelState);
-    const availableWidth = Math.max(240, window.innerWidth - insets.left - insets.right);
-    const availableHeight = Math.max(220, window.innerHeight - insets.top - insets.bottom);
+    const insets = getSafeInsets(panelState, compact);
+    const availableWidth = compact
+      ? Math.min(760, Math.max(300, window.innerWidth - 48))
+      : Math.max(240, window.innerWidth - insets.left - insets.right);
+    const availableHeight = compact
+      ? Math.min(490, Math.max(260, window.innerHeight - 160))
+      : Math.max(220, window.innerHeight - insets.top - insets.bottom);
     const nodes = getNodes();
     if (nodes.length === 0) return;
     const bounds = getNodesBounds(nodes);
@@ -258,11 +268,11 @@ function PanelAwareViewport({ graphKey, panelState }: { graphKey: string; panelS
   return null;
 }
 
-export function RelationshipGraph({ graph, onSelectEdge, onSelectNode, panelState, corpus, highlightedEdges = [] }: RelationshipGraphProps) {
+export function RelationshipGraph({ graph, onSelectEdge, onSelectNode, panelState, corpus, highlightedEdges = [], verificationTiers = {}, compact = false }: RelationshipGraphProps) {
   const highlightedEdgeIds = useMemo(() => new Set(highlightedEdges.map(edgeIdentity)), [highlightedEdges]);
   const highlightedNodeIds = useMemo(() => new Set(highlightedEdges.flatMap((edge) => [edge.source, edge.target])), [highlightedEdges]);
   const nodes = useMemo(() => toFlowNodes(graph, corpus, highlightedNodeIds), [corpus, graph, highlightedNodeIds]);
-  const edges = useMemo(() => toFlowEdges(graph, highlightedEdgeIds), [graph, highlightedEdgeIds]);
+  const edges = useMemo(() => toFlowEdges(graph, highlightedEdgeIds, verificationTiers), [graph, highlightedEdgeIds, verificationTiers]);
   const sourceNodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
 
   const handleEdgeClick = useCallback(
@@ -297,7 +307,7 @@ export function RelationshipGraph({ graph, onSelectEdge, onSelectNode, panelStat
         className="sutra-flow"
       >
         <Background color="#24324a" gap={28} size={1} />
-        <PanelAwareViewport graphKey={graph.target_company} panelState={panelState} />
+        <PanelAwareViewport graphKey={graph.target_company} panelState={panelState} compact={compact} />
         <Controls showInteractive={false} className="!bottom-5 !left-auto !right-5 !border-white/10 !bg-slate-950/85 !shadow-xl [&>button]:!border-white/10 [&>button]:!bg-slate-950 [&>button]:!fill-slate-300 [&>button:hover]:!bg-slate-800" />
       </ReactFlow>
     </div>

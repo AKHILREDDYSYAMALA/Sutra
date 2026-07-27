@@ -1,24 +1,15 @@
 import { eq, sql } from "drizzle-orm";
 
-import {
-  claims,
-  companies,
-  documents,
-  entities,
-  entityAliases,
-  type Document,
-} from "./schema";
+import { claims, companies, documents, type Document } from "./schema";
 import {
   loadStaticGraphFiles,
   parseReportDate,
   slugify,
-  type StaticEdge,
   type StaticGraphFile,
-  type StaticNode,
 } from "./static-graphs";
 import { requiredDirectUrl } from "./env";
 import { createDatabaseClient } from "../lib/db/client";
-import { normalizeEntityName } from "../lib/entity-normalization";
+import { relationTypeFor, resolveGraphEntities } from "../lib/ingestion/resolve-entities";
 
 const PUBLISHED_TRANSITIONS = [
   "fetched",
@@ -37,56 +28,8 @@ const AGENCY_SOURCES: Record<string, "icra" | "care" | "crisil" | "india_ratings
   "india ratings": "india_ratings",
 };
 
-const GOVERNMENT_ENTITY = /^(ministry of defence|government of india|indian (army|navy|air force|airforce)|indian space research organisation|isro|indian railways)$/i;
-const FOREIGN_ENTITY = /\b(bloom energy|motorola mobility|ismartu|longcheer|toshiba|samsung|lg|xiaomi|rolls[- ]royce|dassault|israel aerospace|blue origin)\b/i;
-
 function documentSource(agency: string | null) {
   return agency ? AGENCY_SOURCES[agency.trim().toLowerCase()] ?? "manual" : "manual";
-}
-
-function isCoveredCompanyNode(node: StaticNode): boolean {
-  return node.type === "target" || node.type === "company";
-}
-
-function entityTypeFor(node: StaticNode): "company" | "government" | "institution" | "unnamed" {
-  if (node.named === false) return "unnamed";
-  if (GOVERNMENT_ENTITY.test(node.label)) return "government";
-  if (
-    node.type === "lender" &&
-    /\b(bank|lic|life insurance corporation)\b/i.test(node.label)
-  ) {
-    return "institution";
-  }
-  return "company";
-}
-
-function countryFor(node: StaticNode): string | null {
-  return FOREIGN_ENTITY.test(node.label) ? null : "IN";
-}
-
-function relationTypeFor(edge: StaticEdge, nodes: Map<string, StaticNode>) {
-  const source = nodes.get(edge.source);
-  const target = nodes.get(edge.target);
-  if (!source || !target) throw new Error(`Unknown edge endpoint ${edge.source} -> ${edge.target}.`);
-
-  if (source.named === false || target.named === false || target.type === "industry") {
-    // The Day 1 ledger has no industry relation type. Treat sector-wide and
-    // ghost-node dependencies as the intentionally broad dependency category.
-    return "unnamed_dependency" as const;
-  }
-
-  if (
-    target.type === "customer" ||
-    target.type === "supplier" ||
-    target.type === "lender" ||
-    target.type === "subsidiary" ||
-    target.type === "parent" ||
-    target.type === "group_company"
-  ) {
-    return target.type;
-  }
-
-  throw new Error(`Cannot map target node type ${JSON.stringify(target.type)} to a claim relation type.`);
 }
 
 async function advanceToPublished(
@@ -159,69 +102,12 @@ async function importFile(
     if (!createdDocument) throw new Error(`${staticFile.fileName}: document insert did not return a row.`);
     const document = await advanceToPublished(tx, createdDocument.id);
 
-    const entityByNodeId = new Map<string, string>();
-    for (const node of staticFile.graph.nodes) {
-      if (node.named === false) {
-        const [entity] = await tx
-          .insert(entities)
-          .values({
-            canonicalName: node.label,
-            normalizedName: `unnamed:${document.id}:${slugify(node.label)}`,
-            entityType: "unnamed",
-            country: "IN",
-            isListed: false,
-          })
-          .returning();
-
-        if (!entity) throw new Error(`${staticFile.fileName}: unnamed entity insert did not return a row.`);
-        entityByNodeId.set(node.id, entity.id);
-        continue;
-      }
-
-      const normalizedName = normalizeEntityName(node.label);
-      if (!normalizedName) throw new Error(`${staticFile.fileName}: node ${node.id} normalized to an empty name.`);
-
-      let [entity] = await tx
-        .select()
-        .from(entities)
-        .where(eq(entities.normalizedName, normalizedName))
-        .limit(1);
-
-      if (!entity) {
-        [entity] = await tx
-          .insert(entities)
-          .values({
-            canonicalName: node.label,
-            normalizedName,
-            entityType: entityTypeFor(node),
-            country: countryFor(node),
-            isListed: isCoveredCompanyNode(node),
-            companyId: isCoveredCompanyNode(node) ? company.id : null,
-          })
-          .returning();
-      } else if (isCoveredCompanyNode(node) && (entity.companyId !== company.id || !entity.isListed)) {
-        [entity] = await tx
-          .update(entities)
-          .set({ companyId: company.id, isListed: true })
-          .where(eq(entities.id, entity.id))
-          .returning();
-      }
-
-      if (!entity) throw new Error(`${staticFile.fileName}: entity resolution did not return a row.`);
-      entityByNodeId.set(node.id, entity.id);
-
-      await tx
-        .insert(entityAliases)
-        .values({
-          rawName: node.label,
-          normalizedRaw: normalizedName,
-          entityId: entity.id,
-          confidence: "1.00",
-          resolvedBy: "human",
-          sourceDocumentId: document.id,
-        })
-        .onConflictDoNothing({ target: [entityAliases.normalizedRaw, entityAliases.entityId] });
-    }
+    const entityByNodeId = await resolveGraphEntities(tx, {
+      documentId: document.id,
+      companyId: company.id,
+      nodes: staticFile.graph.nodes,
+      resolvedBy: "human",
+    });
 
     const nodes = new Map(staticFile.graph.nodes.map((node) => [node.id, node]));
     for (const edge of staticFile.graph.edges) {

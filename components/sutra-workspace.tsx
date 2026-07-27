@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CompanyList } from "@/components/company-picker";
 import { DependencyReadCard } from "@/components/dependency-read";
 import { RelationshipGraph } from "@/components/relationship-graph";
+import { VerificationTierPill } from "@/components/verification-tier-pill";
 import type { SandboxCompany } from "@/lib/company-data";
 import {
   type CorpusIndex,
@@ -29,12 +30,6 @@ const edgeRiskLabel: Record<NonNullable<GraphEdge["risk_flag"]>, string> = {
   medium: "Medium risk",
   low: "Low risk",
 };
-
-const verificationTierLabel = {
-  human_verified: "Human-verified",
-  machine_validated: "Machine-validated",
-  excluded: "Excluded",
-} as const;
 
 type SutraWorkspaceProps = {
   companies: SandboxCompany[];
@@ -66,6 +61,7 @@ export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
   );
   const isWorkspacePanelOpen = isLeftPanelOpen || companyId === null;
   const selectedCompanyName = companies.find((company) => company.id === companyId)?.name ?? graph.target_company;
+  const selectedCompany = companies.find((company) => company.id === companyId) ?? null;
   const selectedCorpusEntity = useMemo(() => (selectedEntityNode ? getCorpusEntity(corpus, selectedEntityNode.label) : null), [corpus, selectedEntityNode]);
   const currentReportRelationships = useMemo(
     () => (selectedEntityNode ? getGraphRelationshipsForEntity(graph, selectedEntityNode.id) : []),
@@ -211,6 +207,7 @@ export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
         panelState={panelState}
         corpus={corpus}
         highlightedEdges={selectedEvidenceEdges}
+        verificationTiers={verificationTiers}
       />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_45%,rgba(8,145,178,0.08),transparent_38%),linear-gradient(180deg,rgba(2,6,23,0.2),rgba(2,6,23,0.45))]" />
 
@@ -223,7 +220,7 @@ export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
           </div>
         </div>
         <div className="flex items-center gap-2 rounded-full border border-emerald-300/15 bg-emerald-300/5 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-200">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> Evidence-first
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" /> {selectedCompany ? `${selectedCompany.graph.edges.length} claims · ${selectedCompany.verificationSummary.machineValidated === 0 ? "all human-verified" : `${selectedCompany.verificationSummary.humanVerified} human, ${selectedCompany.verificationSummary.machineValidated} machine`}` : "Live analysis"}
         </div>
       </header>
 
@@ -320,6 +317,8 @@ export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
           <LegendDot className="bg-violet-300" label="Lender" />
           <LegendDot className="bg-amber-300" label="Group" />
           <LegendDot label="Unnamed" ghost />
+          <LegendDot className="bg-emerald-300" label="Human-verified" />
+          <LegendDot label="Machine-validated" dashed />
         </div>
       </section>
 
@@ -432,6 +431,7 @@ export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
             {selectedEvidenceEdges.map((edge, index) => (
               <div key={`${edge.source}-${edge.target}-${edge.relation}-${index}`} className={index > 0 ? "border-t border-white/10 pt-4" : ""}>
                 {selectedEvidenceEdges.length > 1 && <p className="mb-2 text-xs font-semibold leading-snug text-slate-100">{edge.relation}</p>}
+                <VerificationTierPill tier={verificationTiers[edgeIdentity(edge)] ?? "machine_validated"} />
                 <blockquote className="border-l-2 border-cyan-300/70 bg-cyan-300/5 px-3 py-2.5 font-serif text-sm leading-relaxed text-slate-200">
                   “{edge.source_quote}”
                 </blockquote>
@@ -440,7 +440,6 @@ export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
                   <span className="text-slate-700">•</span>
                   <span>{edge.confidence} confidence</span>
                   <span className="text-slate-700">•</span>
-                  <span>{verificationTierLabel[verificationTiers[edgeIdentity(edge)] ?? "machine_validated"]}</span>
                   {edge.risk_flag && (
                     <>
                       <span className="text-slate-700">•</span>
@@ -469,6 +468,7 @@ function RelationshipRecord({ relationship }: { relationship: CorpusRelationship
       <p className="text-xs font-semibold leading-snug text-slate-100">{relationship.perspective}</p>
       <p className="mt-1 text-[11px] leading-relaxed text-slate-400">Reported relation · {relationship.relation}</p>
       {exposure && <p className="mt-1 text-[11px] font-medium text-cyan-100">{exposure}</p>}
+      <div className="mt-3"><VerificationTierPill tier={relationship.verification_tier} /></div>
       <blockquote className="mt-3 border-l-2 border-cyan-300/60 bg-cyan-300/5 px-2.5 py-2 font-serif text-xs leading-relaxed text-slate-200">
         “{relationship.source_quote}”
       </blockquote>
@@ -484,10 +484,10 @@ function compactCompanyName(name: string) {
   return name.replace(/\bLimited\b/g, "Ltd").replace(/\bPrivate\b/g, "Pvt");
 }
 
-function LegendDot({ className = "", label, ghost = false }: { className?: string; label: string; ghost?: boolean }) {
+function LegendDot({ className = "", label, ghost = false, dashed = false }: { className?: string; label: string; ghost?: boolean; dashed?: boolean }) {
   return (
     <span className="flex items-center gap-1.5">
-      <span className={ghost ? "h-2 w-2 rounded-sm border border-dashed border-slate-400/80" : `h-1.5 w-1.5 rounded-full ${className}`} />
+      <span className={ghost ? "h-2 w-2 rounded-sm border border-dashed border-slate-400/80" : dashed ? "h-px w-3 border-t border-dashed border-amber-200" : `h-1.5 w-1.5 rounded-full ${className}`} />
       {label}
     </span>
   );

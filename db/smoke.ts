@@ -194,6 +194,27 @@ async function smoke() {
       assert.equal(supersededClaim?.supersededByClaimId, replacementClaim.id);
       assert.equal(supersededClaim?.lifecycleState, "superseded");
 
+      // A review decision is deliberately the only post-insert claim mutation.
+      const [reviewedClaim] = await tx
+        .update(claims)
+        .set({
+          verificationTier: "human_verified",
+          reviewedBy: user.id,
+          reviewedAt: sql`now()`,
+        })
+        .where(eq(claims.id, replacementClaim.id))
+        .returning();
+      assert.equal(reviewedClaim?.verificationTier, "human_verified");
+
+      await expectConstraint("review decision changed after finalization", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint
+            .update(claims)
+            .set({ verificationTier: "excluded", exclusionReason: "other" })
+            .where(eq(claims.id, replacementClaim.id));
+        }),
+      );
+
       const [event] = await tx
         .insert(events)
         .values({

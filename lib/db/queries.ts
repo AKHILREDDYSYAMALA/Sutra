@@ -357,6 +357,7 @@ export type VerifiedCompanySummary = {
   publishedDate: string | null;
   claimCount: number;
   riskSummary: { high: number; medium: number; low: number };
+  verificationSummary: { humanVerified: number; machineValidated: number };
 };
 
 /** Lists companies that have a published document with retained claims. */
@@ -373,6 +374,8 @@ export async function listVerifiedCompanies(db: DatabaseClient): Promise<Verifie
       highRiskCount: sql<number>`count(*) filter (where ${claims.riskFlag} = 'high')::int`,
       mediumRiskCount: sql<number>`count(*) filter (where ${claims.riskFlag} = 'medium')::int`,
       lowRiskCount: sql<number>`count(*) filter (where ${claims.riskFlag} = 'low')::int`,
+      humanVerifiedCount: sql<number>`count(*) filter (where ${claims.verificationTier} = 'human_verified')::int`,
+      machineValidatedCount: sql<number>`count(*) filter (where ${claims.verificationTier} = 'machine_validated')::int`,
     })
     .from(companies)
     .innerJoin(documents, and(eq(documents.companyId, companies.id), eq(documents.status, "published"), isLatestPublishedDocument()))
@@ -389,6 +392,7 @@ export async function listVerifiedCompanies(db: DatabaseClient): Promise<Verifie
     publishedDate: row.publishedDate,
     claimCount: row.claimCount,
     riskSummary: { high: row.highRiskCount, medium: row.mediumRiskCount, low: row.lowRiskCount },
+    verificationSummary: { humanVerified: row.humanVerifiedCount, machineValidated: row.machineValidatedCount },
   }));
 }
 

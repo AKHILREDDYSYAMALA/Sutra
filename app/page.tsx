@@ -36,6 +36,7 @@ const getWorkspaceData = unstable_cache(
         agency: rendered.graph.agency,
         graph: rendered.graph,
         verificationTiers: rendered.verificationTiers,
+        verificationSummary: summary.verificationSummary,
         excludedClaimCount: rendered.excludedClaimCount,
       }];
     });

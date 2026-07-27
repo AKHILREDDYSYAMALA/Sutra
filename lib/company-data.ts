@@ -9,5 +9,6 @@ export type CompanyOption = {
 export type SandboxCompany = CompanyOption & {
   graph: GraphData;
   verificationTiers: Record<string, "human_verified" | "machine_validated" | "excluded">;
+  verificationSummary: { humanVerified: number; machineValidated: number };
   excludedClaimCount: number;
 };

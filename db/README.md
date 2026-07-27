@@ -10,11 +10,20 @@ port 6543) with prepared statements disabled.
 
 ## Vercel environment
 
-Set **only `DATABASE_URL`** for the Sutra Vercel application (Production and
-Preview as appropriate). It must be the Supabase **transaction pooler** URL on
-port **6543**, including `pgbouncer=true`. Runtime code uses this variable with
-`postgres-js` configured as `prepare: false`, because the transaction pooler
-does not support prepared statements.
+Set `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and
+`OPENAI_API_KEY` for the
+Sutra Vercel application (Production and Preview as appropriate). `DATABASE_URL`
+must be the Supabase **transaction pooler** URL on port **6543**, including
+`pgbouncer=true`. Runtime code uses this variable with `postgres-js` configured
+as `prepare: false`, because the transaction pooler does not support prepared
+statements. The Supabase URL and service-role key are server-only: ingestion
+uses them for the private `documents` Storage bucket and the review page creates
+short-lived signed PDF URLs. Never expose the key through `NEXT_PUBLIC_*`.
+
+Set `ADMIN_TOKEN` as a temporary Day 5 review gate. In production, the reviewer
+must send this exact token in either `Authorization: Bearer …` or
+`x-admin-token`; comparison is timing-safe. Development permits review without
+the token. Day 6 authentication will replace this gate.
 
 Do **not** use `DIRECT_URL` in a request handler or Server Component, and do
 not need to set it in Vercel for the application. `DIRECT_URL` is the Supabase
@@ -40,7 +49,26 @@ sets a short lease in `next_attempt_at`.
 Claims are append-only. A correction is a new claim. Supersession inserts the
 replacement claim and then only marks the older claim `superseded` with a
 forward pointer. A database trigger prevents changing claim substance or
-deleting a claim.
+deleting a claim. The only mutable claim fields are the one-time human review
+metadata: a `machine_validated` tier can become `human_verified` or `excluded`
+alongside `reviewed_by`, `reviewed_at`, and an exclusion reason. That final
+decision is then immutable too.
+
+## Ingestion and review
+
+`npm run ingest -- --url <pdf-url>` and `npm run ingest -- --file <path>` use
+the same exported PDF extraction path as `/api/analyze`. URL downloads have a
+PDF content-type check, 10MB cap, 30-second timeout, and an identifiable user
+agent. The raw PDF is hash-addressed at `documents/<sha256>.pdf` in private
+Storage; duplicate hashes stop before re-extraction. Only `rating_rationale`
+documents proceed to extraction. Validation exclusions are stored in
+`documents.metadata.excluded` and never become claims.
+
+New claims are `machine_validated` and a document stops at
+`ready_for_review`. `/review` is the human queue; it is the only Day 5 path that
+can approve/reject claims and publish a document. Public reads continue to
+select only `documents.status = 'published'` and non-excluded verification
+tiers.
 
 ## Resolved claims view
 
