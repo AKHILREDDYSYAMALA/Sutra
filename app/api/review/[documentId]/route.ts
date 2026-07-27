@@ -1,13 +1,14 @@
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
-import { decideClaims, getDb, publishReviewedDocument } from "@/lib/db";
+import { decideClaims, getDb, publishReviewedDocument, requestSecondLook } from "@/lib/db";
 import { hasReviewAccess } from "@/lib/review/access";
 
 export const runtime = "nodejs";
 
 type ReviewAction =
-  | { action: "approve" | "reject"; claimIds: string[]; reason?: string }
+  | { action: "approve" | "reject"; claimIds: string[]; reason?: string; decisionMethod?: "individual" | "bulk"; bulkConfirmation?: string }
+  | { action: "second_look"; claimId: string; note?: string }
   | { action: "publish" };
 
 export async function POST(request: Request, context: { params: Promise<{ documentId: string }> }) {
@@ -20,9 +21,27 @@ export async function POST(request: Request, context: { params: Promise<{ docume
       if (!Array.isArray(body.claimIds) || body.claimIds.some((id) => typeof id !== "string")) {
         return NextResponse.json({ error: "claimIds must be a list of claim identifiers." }, { status: 400 });
       }
-      const result = await decideClaims(db, { documentId, claimIds: body.claimIds, decision: body.action, reason: typeof body.reason === "string" ? body.reason : undefined });
+      if (body.decisionMethod !== "individual" && body.decisionMethod !== "bulk") {
+        return NextResponse.json({ error: "decisionMethod must be individual or bulk." }, { status: 400 });
+      }
+      const result = await decideClaims(db, {
+        documentId,
+        claimIds: body.claimIds,
+        decision: body.action,
+        reason: typeof body.reason === "string" ? body.reason : undefined,
+        decisionMethod: body.decisionMethod,
+        bulkConfirmation: typeof body.bulkConfirmation === "string" ? body.bulkConfirmation : undefined,
+      });
       revalidatePath("/");
       revalidatePath("/review");
+      revalidatePath(`/review/${documentId}`);
+      return NextResponse.json(result);
+    }
+    if (body.action === "second_look") {
+      if (typeof body.claimId !== "string" || typeof body.note !== "string") {
+        return NextResponse.json({ error: "claimId and a second-look note are required." }, { status: 400 });
+      }
+      const result = await requestSecondLook(db, { documentId, claimId: body.claimId, note: body.note });
       revalidatePath(`/review/${documentId}`);
       return NextResponse.json(result);
     }

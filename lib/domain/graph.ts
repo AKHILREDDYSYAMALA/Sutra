@@ -26,6 +26,9 @@ export type LedgerClaim = {
   observedDate: string;
   extractionConfidence: string | null;
   verificationTier: "human_verified" | "machine_validated" | "excluded";
+  reviewState?: "pending" | "needs_second_look" | "decided";
+  reviewNote?: string | null;
+  decisionMethod?: "individual" | "bulk" | null;
 };
 
 export type LedgerGraphDocument = {

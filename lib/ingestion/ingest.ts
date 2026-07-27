@@ -4,6 +4,7 @@ import path from "node:path";
 import { eq, sql } from "drizzle-orm";
 
 import { claims, companies, documents } from "@/db/schema";
+import { seedKnownEntityMergeRejections } from "@/db/known-entity-rejections";
 import { parseReportDate, slugify } from "@/db/static-graphs";
 import { advanceDocumentStatus, getDb, scheduleDocumentRetry, type DatabaseClient } from "@/lib/db";
 import { extract, extractPdfText, type ExtractedDocument, type ExtractedPdfText } from "@/lib/extraction/extract";
@@ -145,6 +146,24 @@ function documentMetadata(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function storedValidationExclusionCount(value: unknown) {
+  const metadata = documentMetadata(value);
+  return Array.isArray(metadata.excluded) ? metadata.excluded.length : 0;
+}
+
+async function storedDocumentCounts(db: DatabaseClient, document: typeof documents.$inferSelect) {
+  const existingClaims = await db
+    .select({ verificationTier: claims.verificationTier })
+    .from(claims)
+    .where(eq(claims.documentId, document.id));
+  return {
+    claimCount: existingClaims.length,
+    // Preserve the result contract used for a fresh ingestion: this is the
+    // number of edges validation excluded before they became ledger claims.
+    excludedCount: storedValidationExclusionCount(document.metadata),
+  };
+}
+
 const resumableDocumentStatuses = new Set(["discovered", "fetched", "classified", "failed"]);
 const documentTypes = new Set(["rating_rationale", "rating_intimation", "annual_report", "rpt_schedule", "order_win", "drhp", "other"]);
 
@@ -225,14 +244,17 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
   const sha256 = createHash("sha256").update(sourcePdf.bytes).digest("hex");
   const prepared = await createOrResumeDocument(db, input, sourcePdf, sha256);
   if (prepared.duplicate) {
+    const existingCounts = await storedDocumentCounts(db, prepared.document);
     return {
       outcome: "duplicate",
       documentId: prepared.document.id,
       sha256,
       status: prepared.document.status,
-      claimCount: 0,
-      excludedCount: 0,
-      company: null,
+      claimCount: existingCounts.claimCount,
+      excludedCount: existingCounts.excludedCount,
+      company: prepared.document.companyId
+        ? (await db.select({ name: companies.name }).from(companies).where(eq(companies.id, prepared.document.companyId)).limit(1))[0]?.name ?? null
+        : null,
       docType: prepared.document.docType,
       reason: `Duplicate: document already has durable work at status '${prepared.document.status}'.`,
     };
@@ -280,7 +302,14 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     const extracted = await extractGraph(sourcePdf.bytes, text ?? await extractText(sourcePdf.bytes));
     await advanceDocumentStatus(db, document.id, "extracted");
     await db.update(documents).set({
-      metadata: { ...documentMetadata(document.metadata), classification, excluded: extracted.meta.excluded },
+      metadata: {
+        ...documentMetadata(document.metadata),
+        classification,
+        excluded: extracted.meta.excluded,
+        // This server-only source text makes a claim's ±1 sentence context
+        // reviewable without forcing every reviewer to open the source PDF.
+        extractedText: extracted.text.fullText,
+      },
       updatedAt: sql`now()`,
     }).where(eq(documents.id, document.id));
     await advanceDocumentStatus(db, document.id, "validated");
@@ -294,7 +323,15 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
       agency: extracted.graph.agency,
       rating: extracted.graph.rating,
       publishedDate,
-      metadata: { ...documentMetadata(document.metadata), classification, excluded: extracted.meta.excluded, keyRisks: extracted.graph.key_risks, reportDateRaw: extracted.graph.report_date, companyResolution: { path: companyResult.path, companyName, extractedCompanyName: extracted.graph.target_company } },
+      metadata: {
+        ...documentMetadata(document.metadata),
+        classification,
+        excluded: extracted.meta.excluded,
+        extractedText: extracted.text.fullText,
+        keyRisks: extracted.graph.key_risks,
+        reportDateRaw: extracted.graph.report_date,
+        companyResolution: { path: companyResult.path, companyName, extractedCompanyName: extracted.graph.target_company },
+      },
       updatedAt: sql`now()`,
     }).where(eq(documents.id, document.id));
 
@@ -332,6 +369,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
       if (rows.length > 0) await tx.insert(claims).values(rows);
       return rows.length;
     });
+    await seedKnownEntityMergeRejections(db);
     await advanceDocumentStatus(db, document.id, "resolved");
     await advanceDocumentStatus(db, document.id, "ready_for_review");
     return { outcome: "ready_for_review", documentId: document.id, sha256, status: "ready_for_review", claimCount, excludedCount: extracted.meta.excluded.length, company: company.name, docType: classification.docType, resumedFrom: prepared.resumedFrom };

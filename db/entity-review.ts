@@ -112,8 +112,13 @@ async function main() {
       order by entities.canonical_name
     `;
 
+    const rejectedPairs = new Set((await client<{ entity_a_id: string; entity_b_id: string }[]>`
+      select entity_a_id, entity_b_id from entity_merge_rejections
+    `).map((pair) => [pair.entity_a_id, pair.entity_b_id].sort().join("\u0000")));
+
     const candidates = entities.flatMap((left, leftIndex) =>
       entities.slice(leftIndex + 1).flatMap((right) => {
+        if (rejectedPairs.has([left.id, right.id].sort().join("\u0000"))) return [];
         const candidate = candidateFor(left, right);
         return candidate ? [candidate] : [];
       }),

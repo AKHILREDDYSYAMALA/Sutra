@@ -6,3 +6,6 @@ node_modules/
 # Local secrets. Keep the safe template under version control.
 .env*
 !.env.example
+
+# Timestamped database exports are local recovery artifacts, never source data.
+backups/

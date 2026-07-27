@@ -12,9 +12,19 @@ const sourceAliases = alias(entityAliases, "review_source_aliases");
 const targetAliases = alias(entityAliases, "review_target_aliases");
 
 type ReviewTier = "human_verified" | "machine_validated" | "excluded";
+type ReviewState = "pending" | "needs_second_look" | "decided";
+type DecisionMethod = "individual" | "bulk";
 
 function toTier(value: string): ReviewTier {
   return value === "excluded" ? "excluded" : value === "machine_validated" ? "machine_validated" : "human_verified";
+}
+
+function toReviewState(value: string): ReviewState {
+  return value === "needs_second_look" || value === "decided" ? value : "pending";
+}
+
+function toDecisionMethod(value: string | null): DecisionMethod | null {
+  return value === "bulk" || value === "individual" ? value : null;
 }
 
 export type ReviewQueueItem = {
@@ -99,6 +109,9 @@ export async function getReviewDocument(db: DatabaseClient, documentId: string):
       observedDate: claims.observedDate,
       extractionConfidence: claims.extractionConfidence,
       verificationTier: claims.verificationTier,
+      reviewState: claims.reviewState,
+      reviewNote: claims.reviewNote,
+      decisionMethod: claims.decisionMethod,
       sourceCanonicalName: sourceEntities.canonicalName,
       sourceNormalizedName: sourceEntities.normalizedName,
       sourceEntityType: sourceEntities.entityType,
@@ -118,7 +131,11 @@ export async function getReviewDocument(db: DatabaseClient, documentId: string):
     .leftJoin(sourceAliases, and(eq(sourceAliases.entityId, sourceEntities.id), eq(sourceAliases.sourceDocumentId, documents.id)))
     .leftJoin(targetAliases, and(eq(targetAliases.entityId, targetEntities.id), eq(targetAliases.sourceDocumentId, documents.id)))
     .where(and(eq(documents.id, documentId), eq(documents.status, "ready_for_review")))
-    .orderBy(asc(claims.createdAt));
+    .orderBy(
+      sql`case ${claims.riskFlag} when 'high' then 0 when 'medium' then 1 when 'low' then 2 else 3 end`,
+      desc(claims.exposurePct),
+      asc(claims.createdAt),
+    );
 
   const first = rows[0];
   if (!first) return null;
@@ -144,6 +161,9 @@ export async function getReviewDocument(db: DatabaseClient, documentId: string):
       observedDate: row.observedDate,
       extractionConfidence: row.extractionConfidence,
       verificationTier: toTier(row.verificationTier),
+      reviewState: toReviewState(row.reviewState),
+      reviewNote: row.reviewNote,
+      decisionMethod: toDecisionMethod(row.decisionMethod),
     });
   }
   const ledger: LedgerGraph = {
@@ -181,15 +201,32 @@ async function reviewerId(db: DatabaseClient) {
 
 export async function decideClaims(
   db: DatabaseClient,
-  input: { documentId: string; claimIds: string[]; decision: "approve" | "reject"; reason?: string },
+  input: {
+    documentId: string;
+    claimIds: string[];
+    decision: "approve" | "reject";
+    reason?: string;
+    decisionMethod: DecisionMethod;
+    bulkConfirmation?: string;
+  },
 ) {
   if (input.claimIds.length === 0) throw new Error("Select at least one claim.");
   if (input.decision === "reject" && !input.reason?.trim()) throw new Error("A rejection reason is required.");
+  if (input.decisionMethod === "individual" && input.claimIds.length !== 1) {
+    throw new Error("Individual review must decide exactly one claim.");
+  }
+  if (input.decisionMethod === "bulk") {
+    if (input.claimIds.length < 2) throw new Error("Bulk review requires at least two claims.");
+    const expected = `${input.decision} ${input.claimIds.length} claims`;
+    if (input.bulkConfirmation?.trim().toLowerCase() !== expected) {
+      throw new Error(`Type '${expected}' to record a bulk decision.`);
+    }
+  }
   const reviewer = await reviewerId(db);
   return db.transaction(async (tx) => {
     const [document] = await tx.select({ status: documents.status }).from(documents).where(eq(documents.id, input.documentId)).for("update");
     if (!document || document.status !== "ready_for_review") throw new Error("This document is not available for review.");
-    const selected = await tx.select({ id: claims.id, verificationTier: claims.verificationTier }).from(claims).where(and(eq(claims.documentId, input.documentId), inArray(claims.id, input.claimIds))).for("update");
+    const selected = await tx.select({ id: claims.id, verificationTier: claims.verificationTier, reviewState: claims.reviewState }).from(claims).where(and(eq(claims.documentId, input.documentId), inArray(claims.id, input.claimIds))).for("update");
     if (selected.length !== input.claimIds.length || selected.some((claim) => claim.verificationTier !== "machine_validated")) {
       throw new Error("One or more claims have already been reviewed.");
     }
@@ -198,9 +235,30 @@ export async function decideClaims(
       exclusionReason: input.decision === "reject" ? input.reason!.trim() : null,
       reviewedBy: reviewer,
       reviewedAt: sql`now()`,
+      reviewState: "decided",
+      decisionMethod: input.decisionMethod,
     }).where(and(eq(claims.documentId, input.documentId), inArray(claims.id, input.claimIds), eq(claims.verificationTier, "machine_validated"))).returning({ id: claims.id });
     if (!updated) throw new Error("No claims were updated.");
     return { reviewed: input.claimIds.length };
+  });
+}
+
+/** Park a machine-valid claim without deciding it. It remains publish-blocking. */
+export async function requestSecondLook(
+  db: DatabaseClient,
+  input: { documentId: string; claimId: string; note: string },
+) {
+  if (!input.note.trim()) throw new Error("A second-look note is required.");
+  return db.transaction(async (tx) => {
+    const [document] = await tx.select({ status: documents.status }).from(documents).where(eq(documents.id, input.documentId)).for("update");
+    if (!document || document.status !== "ready_for_review") throw new Error("This document is not available for review.");
+    const [claim] = await tx.select({ id: claims.id, verificationTier: claims.verificationTier, reviewState: claims.reviewState }).from(claims).where(and(eq(claims.id, input.claimId), eq(claims.documentId, input.documentId))).for("update");
+    if (!claim || claim.verificationTier !== "machine_validated" || claim.reviewState !== "pending") {
+      throw new Error("Only an undecided claim can be parked for a second look.");
+    }
+    const [updated] = await tx.update(claims).set({ reviewState: "needs_second_look", reviewNote: input.note.trim() }).where(eq(claims.id, input.claimId)).returning({ id: claims.id });
+    if (!updated) throw new Error("Could not park the claim for a second look.");
+    return { parked: 1 };
   });
 }
 

@@ -208,6 +208,34 @@ export const entityMerges = pgTable(
   ],
 );
 
+/**
+ * A human-declined merge is evidence too. Keeping the pair in normalized UUID
+ * order makes (A, B) and (B, A) one durable, reversible decision surface.
+ */
+export const entityMergeRejections = pgTable(
+  "entity_merge_rejections",
+  {
+    entityAId: uuid("entity_a_id")
+      .notNull()
+      .references(() => entities.id),
+    entityBId: uuid("entity_b_id")
+      .notNull()
+      .references(() => entities.id),
+    rejectedBy: text("rejected_by").notNull(),
+    reason: text("reason").notNull(),
+    rejectedAt: timestamp("rejected_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.entityAId, table.entityBId] }),
+    check(
+      "entity_merge_rejections_normalized_order_check",
+      sql`${table.entityAId} < ${table.entityBId}`,
+    ),
+  ],
+);
+
 export const claims = pgTable(
   "claims",
   {
@@ -242,6 +270,12 @@ export const claims = pgTable(
     promptVersion: text("prompt_version").notNull(),
     reviewedBy: uuid("reviewed_by").references(() => users.id),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    // Review state and decision method are operational metadata, never claim
+    // substance. They make human verification auditable without weakening the
+    // append-only evidence guarantee.
+    reviewState: text("review_state").notNull().default("pending"),
+    reviewNote: text("review_note"),
+    decisionMethod: text("decision_method"),
     createdAt: createdAt(),
   },
   (table) => [
@@ -289,6 +323,22 @@ export const claims = pgTable(
     check(
       "claims_extraction_confidence_check",
       sql`${table.extractionConfidence} is null or ${table.extractionConfidence} in ('high', 'medium')`,
+    ),
+    check(
+      "claims_review_state_check",
+      sql`${table.reviewState} in ('pending', 'needs_second_look', 'decided')`,
+    ),
+    check(
+      "claims_review_state_matches_tier_check",
+      sql`(${table.verificationTier} = 'machine_validated' and ${table.reviewState} in ('pending', 'needs_second_look')) or (${table.verificationTier} in ('human_verified', 'excluded') and ${table.reviewState} = 'decided')`,
+    ),
+    check(
+      "claims_second_look_note_check",
+      sql`${table.reviewState} <> 'needs_second_look' or nullif(btrim(${table.reviewNote}), '') is not null`,
+    ),
+    check(
+      "claims_decision_method_check",
+      sql`${table.decisionMethod} is null or ${table.decisionMethod} in ('individual', 'bulk')`,
     ),
   ],
 );

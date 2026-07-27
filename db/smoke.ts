@@ -8,6 +8,7 @@ import {
   documents,
   entities,
   entityMerges,
+  entityMergeRejections,
   eventEntities,
   events,
   users,
@@ -202,10 +203,29 @@ async function smoke() {
           verificationTier: "human_verified",
           reviewedBy: user.id,
           reviewedAt: sql`now()`,
+          reviewState: "decided",
+          decisionMethod: "individual",
         })
         .where(eq(claims.id, replacementClaim.id))
         .returning();
       assert.equal(reviewedClaim?.verificationTier, "human_verified");
+      assert.equal(reviewedClaim?.decisionMethod, "individual");
+
+      const [parkedClaim] = await tx
+        .update(claims)
+        .set({ reviewState: "needs_second_look", reviewNote: "Verify this relationship against the source PDF." })
+        .where(eq(claims.id, cycleClaim.id))
+        .returning();
+      assert.equal(parkedClaim?.reviewState, "needs_second_look");
+
+      await expectConstraint("second-look claim without a note", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint
+            .update(claims)
+            .set({ reviewState: "needs_second_look", reviewNote: null })
+            .where(eq(claims.id, originalClaim.id));
+        }),
+      );
 
       await expectConstraint("review decision changed after finalization", () =>
         tx.transaction(async (savepoint) => {
@@ -232,6 +252,28 @@ async function smoke() {
         entityId: targetEntity.id,
         linkConfidence: "0.95",
       });
+
+      const [rejection] = await tx
+        .insert(entityMergeRejections)
+        .values({
+          entityAId: [sourceEntity.id, targetEntity.id].sort()[0]!,
+          entityBId: [sourceEntity.id, targetEntity.id].sort()[1]!,
+          rejectedBy: "ledger-smoke",
+          reason: "These are distinct smoke entities.",
+        })
+        .returning();
+      assert.ok(rejection);
+
+      await expectConstraint("entity rejection with non-normalized ordering", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint.insert(entityMergeRejections).values({
+            entityAId: [sourceEntity.id, targetEntity.id].sort()[1]!,
+            entityBId: [sourceEntity.id, targetEntity.id].sort()[0]!,
+            rejectedBy: "ledger-smoke",
+            reason: "Ordering must be normalized.",
+          });
+        }),
+      );
 
       await expectConstraint("invalid verification tier", () =>
         tx.transaction(async (savepoint) => {

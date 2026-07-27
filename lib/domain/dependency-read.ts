@@ -75,7 +75,18 @@ export function getDependencyRead(graph: GraphData, options: DependencyReadOptio
 
   const watchItems: DependencyRead["watch_items"] = graph.key_risks.map((risk) => ({ text: risk }));
   const ghostNodeIds = new Set(graph.nodes.filter((node) => node.type === "unnamed_dependency" || node.named === false).map((node) => node.id));
-  const ghostEdges = graph.edges.filter((edge) => ghostNodeIds.has(edge.source) || ghostNodeIds.has(edge.target));
+  // SQL result order is not evidence order. Keep ghost watch items stable across
+  // the JSON fixtures and ledger-backed graphs so a harmless query-plan change
+  // cannot reshuffle the reviewer-facing dependency read.
+  const ghostEdges = graph.edges
+    .filter((edge) => ghostNodeIds.has(edge.source) || ghostNodeIds.has(edge.target))
+    .sort((left, right) => {
+      const leftNode = ghostNodeIds.has(left.source) ? nodeById.get(left.source) : nodeById.get(left.target);
+      const rightNode = ghostNodeIds.has(right.source) ? nodeById.get(right.source) : nodeById.get(right.target);
+      return (leftNode?.label ?? "").localeCompare(rightNode?.label ?? "")
+        || left.relation.localeCompare(right.relation)
+        || left.source_quote.localeCompare(right.source_quote);
+    });
   const addedGhostNodeIds = new Set<string>();
   ghostEdges.forEach((edge) => {
     const ghostNode = ghostNodeIds.has(edge.source) ? nodeById.get(edge.source) : nodeById.get(edge.target);

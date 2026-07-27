@@ -10,6 +10,7 @@ import {
 import { requiredDirectUrl } from "./env";
 import { createDatabaseClient } from "../lib/db/client";
 import { relationTypeFor, resolveGraphEntities } from "../lib/ingestion/resolve-entities";
+import { seedKnownEntityMergeRejections } from "./known-entity-rejections";
 
 const PUBLISHED_TRANSITIONS = [
   "fetched",
@@ -134,6 +135,7 @@ async function importFile(
         observedDate: publishedDate,
         lifecycleState: "current",
         verificationTier: "human_verified",
+        reviewState: "decided",
         extractionConfidence: edge.confidence,
         modelVersion: "gpt-4o",
         promptVersion: "rating_rationale_v1",
@@ -167,6 +169,8 @@ async function main() {
         console.log(`${staticFile.fileName}: imported`);
       }
     }
+    const protectedPairs = await seedKnownEntityMergeRejections(db);
+    if (protectedPairs > 0) console.log(`Seeded ${protectedPairs} known entity-merge rejection(s).`);
   } finally {
     await client.end({ timeout: 5 });
   }

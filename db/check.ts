@@ -8,6 +8,7 @@ const tables = [
   "entities",
   "entity_aliases",
   "entity_merges",
+  "entity_merge_rejections",
   "documents",
   "claims",
   "portfolios",
