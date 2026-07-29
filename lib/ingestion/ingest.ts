@@ -14,6 +14,7 @@ import { classifyDocument, collectClassificationSignals, type DocumentClassifica
 import { reconcileClaimInserts } from "./claim-reconciliation";
 import { extractionTelemetry, storedExtractionTelemetry, type ExtractionTelemetry } from "./extraction-telemetry";
 import { mergeRejectedQuoteDiagnostics, type RejectedQuoteDiagnostic } from "./quote-mismatches";
+import { rawRelationshipPhraseFromQuote } from "./relationship-phrases";
 import { isMalformedDualTargetEdge, resolveGraphEntities, relationTypeFor } from "./resolve-entities";
 import { downloadDocumentPdf, uploadDocumentPdf } from "./storage";
 
@@ -406,6 +407,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
           targetEntityId,
           relationType: relationTypeFor(edge, extractedNodes),
           relationLabel: edge.relation,
+          rawRelationshipPhrase: rawRelationshipPhraseFromQuote(edge.source_quote),
           exposurePct: edge.exposure_pct === null ? null : String(edge.exposure_pct),
           riskFlag: edge.risk_flag,
           quote: edge.source_quote,

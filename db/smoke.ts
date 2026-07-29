@@ -132,6 +132,7 @@ async function smoke() {
         riskFlag: "high",
         quote: "The top customer contributed 35% of revenue during the year.",
         quoteHash: quoteHashFor("The top customer contributed 35% of revenue during the year."),
+        rawRelationshipPhrase: null,
         page: 4,
         observedDate: "2026-07-26",
         verificationTier: "machine_validated",
@@ -185,15 +186,17 @@ async function smoke() {
       const resolvedRows = await tx.execute<{
         id: string;
         quote_hash: string;
+        raw_relationship_phrase: string | null;
         source_entity_resolved: string;
         target_entity_resolved: string;
       }>(sql`
-        select id, quote_hash, source_entity_resolved, target_entity_resolved
+        select id, quote_hash, raw_relationship_phrase, source_entity_resolved, target_entity_resolved
         from claims_resolved
         where id in (${originalClaim.id}, ${cycleClaim.id})
       `);
       const resolvedByClaimId = new Map(resolvedRows.map((row) => [row.id, row]));
       assert.equal(resolvedByClaimId.get(originalClaim.id)?.quote_hash, claimValues.quoteHash, "claims_resolved includes quote_hash");
+      assert.equal(resolvedByClaimId.get(originalClaim.id)?.raw_relationship_phrase, null, "claims_resolved includes raw_relationship_phrase");
       assert.equal(resolvedByClaimId.get(originalClaim.id)?.source_entity_resolved, multiHopCanonical.id, "claims_resolved follows a multi-hop merge");
       assert.equal(resolvedByClaimId.get(originalClaim.id)?.target_entity_resolved, targetEntity.id, "claims_resolved ignores a reverted merge");
       assert.equal(resolvedByClaimId.get(cycleClaim.id)?.source_entity_resolved, cycleEntity.id, "claims_resolved terminates a cycle at its origin");
@@ -418,6 +421,15 @@ async function smoke() {
           await savepoint
             .update(claims)
             .set({ quote: "Claims must not be mutable." })
+            .where(eq(claims.id, originalClaim.id));
+        }),
+      );
+
+      await expectConstraint("raw relationship phrase update", () =>
+        tx.transaction(async (savepoint) => {
+          await savepoint
+            .update(claims)
+            .set({ rawRelationshipPhrase: "joint venture" })
             .where(eq(claims.id, originalClaim.id));
         }),
       );

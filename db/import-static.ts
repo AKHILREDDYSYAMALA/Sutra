@@ -11,6 +11,7 @@ import { requiredDirectUrl } from "./env";
 import { createDatabaseClient } from "../lib/db/client";
 import { relationTypeFor, resolveGraphEntities } from "../lib/ingestion/resolve-entities";
 import { quoteHashFor } from "../lib/ingestion/claim-reconciliation";
+import { rawRelationshipPhraseFromQuote } from "../lib/ingestion/relationship-phrases";
 import { seedKnownEntityMergeRejections } from "./known-entity-rejections";
 
 const PUBLISHED_TRANSITIONS = [
@@ -129,6 +130,7 @@ async function importFile(
         targetEntityId,
         relationType: relationTypeFor(edge, nodes),
         relationLabel: edge.relation,
+        rawRelationshipPhrase: rawRelationshipPhraseFromQuote(edge.source_quote),
         exposurePct: edge.exposure_pct === null ? null : String(edge.exposure_pct),
         riskFlag: edge.risk_flag,
         quote: edge.source_quote,

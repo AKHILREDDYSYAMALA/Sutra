@@ -57,6 +57,13 @@ decision is then immutable too. Review metadata also records `review_state`
 `decision_method` (`individual` or `bulk`). A second-look note is immutable
 once recorded, while the still-machine-validated claim remains publish-blocking.
 
+`claims.raw_relationship_phrase` is optional immutable evidence provenance: a
+deterministic matcher captures wording such as `associate company`, `joint
+venture`, or `acquisition of a majority stake` from the verbatim quote. It is
+separate from the controlled `relation_type` vocabulary. Do not add taxonomy
+types or prompt instructions merely because a phrase appears; analyse the
+accumulated field first.
+
 ## Ingestion and review
 
 `npm run ingest -- --url <pdf-url>` and `npm run ingest -- --file <path>` use

@@ -8,7 +8,7 @@ import type { CorpusIndex } from "@/lib/domain/corpus";
 import type { LedgerGraph } from "@/lib/domain/graph";
 import type { GraphData, GraphEdge, GraphNode } from "@/lib/graph-data";
 
-const emptyCorpus: CorpusIndex = { entities: {}, normalizedLookup: {} };
+const emptyCorpus: CorpusIndex = { entities: {}, normalizedLookup: {}, document_count: 0 };
 type Claim = LedgerGraph["claims"][number];
 type Decision = "approve" | "reject";
 type DecisionMethod = "individual" | "bulk";

@@ -254,6 +254,9 @@ export const claims = pgTable(
       .references(() => entities.id),
     relationType: text("relation_type").notNull(),
     relationLabel: text("relation_label").notNull(),
+    // Exact relationship wording recognised in the evidence quote. This is
+    // deliberately separate from the finite, queryable relationType taxonomy.
+    rawRelationshipPhrase: text("raw_relationship_phrase"),
     exposurePct: numeric("exposure_pct", { precision: 5, scale: 2 }),
     riskFlag: text("risk_flag"),
     quote: text("quote").notNull(),

@@ -13,7 +13,9 @@ import {
   getGraphRelationshipsForEntity,
   getOtherCorpusRelationships,
   getSessionCorpusRelationships,
+  graphSpecificityByNodeId,
   graphReportIdentity,
+  sortRelationshipsByCounterpartySpecificity,
   type CorpusRelationship,
 } from "@/lib/domain/corpus";
 import { getDependencyRead, type DependencyReadLine } from "@/lib/domain/dependency-read";
@@ -55,17 +57,21 @@ export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
   const [analysisMeta, setAnalysisMeta] = useState<AnalysisMeta>(emptyAnalysisMeta);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedEdge = selectedEvidenceEdges[0] ?? null;
+  const specificityByNodeId = useMemo(() => graphSpecificityByNodeId(corpus, graph), [corpus, graph]);
   const dependencyRead = useMemo(
-    () => getDependencyRead(graph, { excludedCount: companyId === null ? analysisMeta.excluded.length : excludedClaimCount }),
-    [analysisMeta.excluded.length, companyId, excludedClaimCount, graph],
+    () => getDependencyRead(graph, {
+      excludedCount: companyId === null ? analysisMeta.excluded.length : excludedClaimCount,
+      specificityByNodeId,
+    }),
+    [analysisMeta.excluded.length, companyId, excludedClaimCount, graph, specificityByNodeId],
   );
   const isWorkspacePanelOpen = isLeftPanelOpen || companyId === null;
   const selectedCompanyName = companies.find((company) => company.id === companyId)?.name ?? graph.target_company;
   const selectedCompany = companies.find((company) => company.id === companyId) ?? null;
   const selectedCorpusEntity = useMemo(() => (selectedEntityNode ? getCorpusEntity(corpus, selectedEntityNode.label) : null), [corpus, selectedEntityNode]);
   const currentReportRelationships = useMemo(
-    () => (selectedEntityNode ? getGraphRelationshipsForEntity(graph, selectedEntityNode.id) : []),
-    [graph, selectedEntityNode],
+    () => sortRelationshipsByCounterpartySpecificity(corpus, selectedEntityNode ? getGraphRelationshipsForEntity(graph, selectedEntityNode.id) : []),
+    [corpus, graph, selectedEntityNode],
   );
   const otherCorpusRelationships = useMemo(() => {
     if (!selectedEntityNode) return [];
@@ -73,7 +79,7 @@ export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
       ...getOtherCorpusRelationships(corpus, selectedEntityNode.label, graph),
       ...getSessionCorpusRelationships(corpus, sessionGraphs, selectedEntityNode.label, graph),
     ];
-    return relationships.filter(
+    const uniqueRelationships = relationships.filter(
       (relationship, index) =>
         relationships.findIndex(
           (candidate) =>
@@ -84,6 +90,7 @@ export function SutraWorkspace({ companies, corpus }: SutraWorkspaceProps) {
             candidate.source_quote === relationship.source_quote,
         ) === index,
     );
+    return sortRelationshipsByCounterpartySpecificity(corpus, uniqueRelationships);
   }, [corpus, graph, selectedEntityNode, sessionGraphs]);
   const panelState = useMemo(
     () => ({

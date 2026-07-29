@@ -7,6 +7,7 @@ import {
   getDb,
   listEntityAliases,
   listEntityMerges,
+  listPublishedCorpusGraphs,
   listVerifiedCompanies,
 } from "@/lib/db";
 
@@ -21,9 +22,10 @@ const getWorkspaceData = unstable_cache(
     const summaries = await listVerifiedCompanies(db);
     const ledgers = (await Promise.all(summaries.map((company) => getCompanyGraph(db, company.slug))))
       .filter((ledger): ledger is NonNullable<typeof ledger> => ledger !== null);
-    const [merges, aliases] = await Promise.all([
+    const [merges, aliases, corpusLedgers] = await Promise.all([
       listEntityMerges(db),
       listEntityAliases(db),
+      listPublishedCorpusGraphs(db),
     ]);
     const summaryById = new Map(summaries.map((company) => [company.id, company]));
     const companies = ledgers.flatMap((ledger) => {
@@ -41,9 +43,9 @@ const getWorkspaceData = unstable_cache(
       }];
     });
 
-    return { companies, corpus: buildCorpusIndex(ledgers, merges, aliases) };
+    return { companies, corpus: buildCorpusIndex(corpusLedgers, merges, aliases) };
   },
-  ["sutra-workspace-ledger-v1"],
+  ["sutra-workspace-ledger-v2"],
   { revalidate: 300 },
 );
 

@@ -8,6 +8,7 @@ import { extract, extractPdfText } from "@/lib/extraction/extract";
 import { reconcileClaimInserts, type ReconciliationCounts, type QuoteVariant } from "./claim-reconciliation";
 import { extractionTelemetry, type ExtractionTelemetry } from "./extraction-telemetry";
 import { mergeRejectedQuoteDiagnostics, type RejectedQuoteDiagnostic } from "./quote-mismatches";
+import { rawRelationshipPhraseFromQuote } from "./relationship-phrases";
 import { isMalformedDualTargetEdge, resolveGraphEntities, relationTypeFor } from "./resolve-entities";
 import { downloadDocumentPdf } from "./storage";
 
@@ -130,6 +131,7 @@ export async function reprocessDocument(input: {
         targetEntityId,
         relationType: relationTypeFor(edge, relationshipData.nodes),
         relationLabel: edge.relation,
+        rawRelationshipPhrase: rawRelationshipPhraseFromQuote(edge.source_quote),
         exposurePct: edge.exposure_pct === null ? null : String(edge.exposure_pct),
         riskFlag: edge.risk_flag,
         quote: edge.source_quote,

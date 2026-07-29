@@ -6,6 +6,11 @@ import { nodeTypeForLedgerClaim, type LedgerEntity, type LedgerGraph } from "./g
 
 export type CorpusRelationship = {
   entityId?: string;
+  counterpartyId?: string;
+  /** Corpus-wide inverse-document-frequency score for the entity being viewed. */
+  entity_specificity_score?: number;
+  /** Corpus-wide inverse-document-frequency score for this relationship's counterparty. */
+  counterparty_specificity_score?: number;
   entity_label: string;
   entity_named: boolean;
   entity_type: string;
@@ -30,12 +35,15 @@ export type CorpusEntity = {
   id: string;
   canonical_label: string;
   report_count: number;
+  /** Smoothed inverse document frequency across every ledger document in the corpus. */
+  specificity_score: number;
   relationships: CorpusRelationship[];
 };
 
 export type CorpusIndex = {
   entities: Record<string, CorpusEntity>;
   normalizedLookup: Record<string, string>;
+  document_count: number;
 };
 
 export type EntityAlias = {
@@ -93,6 +101,7 @@ function graphNode(entity: LedgerEntity, claim: LedgerGraph["claims"][number], e
 function relationshipFor(entity: GraphNode, counterparty: GraphNode, ledger: LedgerGraph, claim: LedgerGraph["claims"][number]): CorpusRelationship {
   return {
     entityId: entity.id,
+    counterpartyId: counterparty.id,
     entity_label: entity.label,
     entity_named: entity.named,
     entity_type: entity.type,
@@ -114,6 +123,16 @@ function relationshipFor(entity: GraphNode, counterparty: GraphNode, ledger: Led
   };
 }
 
+/**
+ * A smoothed inverse-document-frequency score. An entity in every document has a
+ * score of 1; entities found in fewer documents score higher. We deliberately do
+ * not filter low-scoring entities: this only gives ranking surfaces a useful signal.
+ */
+export function entitySpecificityScore(documentCount: number, entityDocumentCount: number) {
+  if (documentCount <= 0 || entityDocumentCount <= 0) return 0;
+  return Math.log((documentCount + 1) / (entityDocumentCount + 1)) + 1;
+}
+
 /** Builds a merge-resolved corpus index from plain ledger rows. */
 export function buildCorpusIndex(
   ledgers: readonly LedgerGraph[],
@@ -126,13 +145,20 @@ export function buildCorpusIndex(
   const entities: Record<string, CorpusEntity> = {};
   const reportIds = new Map<string, Set<string>>();
   const normalizedLookup: Record<string, string> = {};
+  const documentCount = new Set(ledgers.map((ledger) => ledger.document.id)).size;
 
   for (const entity of allEntities.values()) {
     const resolvedId = resolveEntity(entity.id, merges);
     normalizedLookup[entity.normalizedName] = resolvedId;
     if (!entities[resolvedId]) {
       const canonical = allEntities.get(resolvedId) ?? entity;
-      entities[resolvedId] = { id: resolvedId, canonical_label: canonical.canonicalName, report_count: 0, relationships: [] };
+      entities[resolvedId] = {
+        id: resolvedId,
+        canonical_label: canonical.canonicalName,
+        report_count: 0,
+        specificity_score: 0,
+        relationships: [],
+      };
       reportIds.set(resolvedId, new Set());
     }
   }
@@ -151,7 +177,10 @@ export function buildCorpusIndex(
         const resolvedId = resolveEntity(entity.id, merges);
         const entry = entities[resolvedId];
         if (!entry) continue;
-        entry.relationships.push(relationshipFor(entity, counterparty, ledger, claim));
+        const relationship = relationshipFor(entity, counterparty, ledger, claim);
+        relationship.entityId = resolvedId;
+        relationship.counterpartyId = resolveEntity(counterparty.id, merges);
+        entry.relationships.push(relationship);
         reportIds.get(resolvedId)?.add(ledger.document.id);
       }
     }
@@ -159,10 +188,20 @@ export function buildCorpusIndex(
 
   for (const [id, entry] of Object.entries(entities)) {
     entry.report_count = reportIds.get(id)?.size ?? 0;
+    entry.specificity_score = entitySpecificityScore(documentCount, entry.report_count);
+  }
+
+  for (const entry of Object.values(entities)) {
+    for (const relationship of entry.relationships) {
+      relationship.entity_specificity_score = entry.specificity_score;
+      relationship.counterparty_specificity_score = relationship.counterpartyId
+        ? entities[relationship.counterpartyId]?.specificity_score ?? 0
+        : 0;
+    }
     entry.relationships.sort((left, right) => (right.report_date ?? "").localeCompare(left.report_date ?? "") || left.report_company.localeCompare(right.report_company));
   }
 
-  return { entities, normalizedLookup };
+  return { entities, normalizedLookup, document_count: documentCount };
 }
 
 export function getCorpusEntity(corpus: CorpusIndex, label: string): CorpusEntity | null {
@@ -172,6 +211,30 @@ export function getCorpusEntity(corpus: CorpusIndex, label: string): CorpusEntit
 
 export function getCorpusReportCount(corpus: CorpusIndex, label: string): number {
   return getCorpusEntity(corpus, label)?.report_count ?? 0;
+}
+
+export function getCorpusEntitySpecificity(corpus: CorpusIndex, label: string): number {
+  return getCorpusEntity(corpus, label)?.specificity_score ?? 0;
+}
+
+/** Maps graph-node ids to their corpus specificity where the node is known to the corpus. */
+export function graphSpecificityByNodeId(corpus: CorpusIndex, graph: Pick<GraphData, "nodes">): Record<string, number> {
+  return Object.fromEntries(graph.nodes.map((node) => [node.id, getCorpusEntitySpecificity(corpus, node.label)]));
+}
+
+/**
+ * Surfaces relationship records with rarer counterparties first. Session-only
+ * entities have no corpus signal and remain visible after known counterparties.
+ */
+export function sortRelationshipsByCounterpartySpecificity(corpus: CorpusIndex, relationships: readonly CorpusRelationship[]) {
+  return [...relationships].sort((left, right) => {
+    const rightScore = right.counterparty_specificity_score ?? getCorpusEntitySpecificity(corpus, right.counterparty_label);
+    const leftScore = left.counterparty_specificity_score ?? getCorpusEntitySpecificity(corpus, left.counterparty_label);
+    return rightScore - leftScore
+      || (right.report_date ?? "").localeCompare(left.report_date ?? "")
+      || left.counterparty_label.localeCompare(right.counterparty_label)
+      || left.relation.localeCompare(right.relation);
+  });
 }
 
 export function graphReportIdentity(graph: Pick<GraphData, "target_company" | "report_date" | "agency" | "rating">) {
@@ -188,6 +251,7 @@ export function getGraphRelationshipsForEntity(graph: GraphData, entityId: strin
     if (!counterparty) return [];
     return [{
       entityId,
+      counterpartyId: counterparty.id,
       entity_label: entity.label,
       entity_named: entity.named,
       entity_type: entity.type,
@@ -212,9 +276,9 @@ export function getGraphRelationshipsForEntity(graph: GraphData, entityId: strin
 
 export function getOtherCorpusRelationships(corpus: CorpusIndex, entityLabel: string, activeGraph: GraphData) {
   const activeIdentity = graphReportIdentity(activeGraph);
-  return (getCorpusEntity(corpus, entityLabel)?.relationships ?? []).filter(
+  return sortRelationshipsByCounterpartySpecificity(corpus, (getCorpusEntity(corpus, entityLabel)?.relationships ?? []).filter(
     (relationship) => graphReportIdentity({ target_company: relationship.report_company, report_date: relationship.report_date, agency: relationship.agency, rating: relationship.rating }) !== activeIdentity,
-  );
+  ));
 }
 
 export function getSessionCorpusRelationships(corpus: CorpusIndex, graphs: GraphData[], entityLabel: string, activeGraph: GraphData) {

@@ -3,9 +3,10 @@ import test from "node:test";
 
 import { loadStaticGraphFiles, parseReportDate, type StaticEdge, type StaticGraph, type StaticGraphFile } from "../../db/static-graphs";
 import { normalizeEntityName } from "../entity-normalization";
-import { buildCorpusIndex, getCorpusEntity } from "./corpus";
+import { buildCorpusIndex, entitySpecificityScore, getCorpusEntity } from "./corpus";
 import { getDependencyRead } from "./dependency-read";
 import { buildGraphFromClaims, type LedgerGraph } from "./graph";
+import type { GraphData } from "@/lib/graph-data";
 
 function relationTypeFor(edge: StaticEdge, nodes: Map<string, StaticGraph["nodes"][number]>) {
   const source = nodes.get(edge.source)!;
@@ -111,7 +112,38 @@ test("corpus resolution follows a reversible entity merge without changing claim
   assert.ok(samsung);
   assert.equal(samsung.canonical_label, "Samsung Electronics");
   assert.equal(samsung.report_count, 2);
+  assert.equal(corpus.document_count, 2);
+  assert.equal(samsung.specificity_score, entitySpecificityScore(2, 2));
+  const rareEntity = Object.values(corpus.entities).find((entity) => entity.report_count === 1);
+  assert.ok(rareEntity);
+  assert.ok(rareEntity.specificity_score > samsung.specificity_score);
   assert.equal(amber.claims.some((claim) => claim.targetEntityId === "amber-enterprises:samsung"), true);
+});
+
+test("specificity ranks rare single points ahead of ubiquitous ones without filtering either", () => {
+  const graph: GraphData = {
+    target_company: "Example Industries",
+    agency: "ICRA",
+    rating: null,
+    report_date: "2026-06-25",
+    key_risks: [],
+    nodes: [
+      { id: "target", label: "Example Industries", type: "target", named: true },
+      { id: "bank", label: "State Bank of India", type: "lender", named: true },
+      { id: "rare", label: "Bloom Energy", type: "supplier", named: true },
+    ],
+    edges: [
+      { source: "target", target: "bank", relation: "Lender", exposure_pct: 40, risk_flag: null, source_quote: "State Bank of India finances the company.", source_page: 1, confidence: "high" },
+      { source: "target", target: "rare", relation: "Supplier", exposure_pct: 25, risk_flag: null, source_quote: "Bloom Energy supplies a critical component.", source_page: 2, confidence: "high" },
+    ],
+  };
+
+  const dependencyRead = getDependencyRead(graph, {
+    specificityByNodeId: { bank: entitySpecificityScore(12, 5), rare: entitySpecificityScore(12, 1) },
+  });
+
+  assert.deepEqual(dependencyRead.single_points_of_failure.map(({ node }) => node.id), ["rare", "bank"]);
+  assert.equal(dependencyRead.single_points_of_failure.length, 2);
 });
 
 test("parseReportDate accepts only the documented strict date forms", () => {

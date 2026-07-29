@@ -23,6 +23,8 @@ export type DependencyRead = {
 
 export type DependencyReadOptions = {
   excludedCount?: number | null;
+  /** Optional corpus-wide IDF scores keyed by graph node id. Used for ranking only. */
+  specificityByNodeId?: Readonly<Record<string, number>>;
 };
 
 function formatPercentage(value: number) {
@@ -51,6 +53,10 @@ function summariseNames(items: string[], maximum = 2) {
   return `${items.slice(0, maximum).join(" · ")} · +${items.length - maximum} more`;
 }
 
+function singlePointEvidenceScore(item: { edge: GraphEdge }) {
+  return item.edge.risk_flag === "high" ? 10_000 : item.edge.exposure_pct ?? 0;
+}
+
 /** A conservative analyst read, derived only from graph evidence and key risks. */
 export function getDependencyRead(graph: GraphData, options: DependencyReadOptions = {}): DependencyRead {
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
@@ -71,7 +77,16 @@ export function getDependencyRead(graph: GraphData, options: DependencyReadOptio
     const nextScore = edge.risk_flag === "high" ? 10_000 : edge.exposure_pct ?? 0;
     if (!current || nextScore > currentScore) singlePointByNodeId.set(counterparty.id, { node: counterparty, edge });
   });
-  const singlePoints = [...singlePointByNodeId.values()].sort((left, right) => left.node.label.localeCompare(right.node.label));
+  // Banks and other broad counterparties remain material dependencies, but a rare
+  // counterparty should lead this compact analyst read when both meet the same
+  // threshold. The score only changes presentation order; nothing is omitted.
+  const singlePoints = [...singlePointByNodeId.values()].sort((left, right) => {
+    const rightSpecificity = options.specificityByNodeId?.[right.node.id] ?? 0;
+    const leftSpecificity = options.specificityByNodeId?.[left.node.id] ?? 0;
+    return rightSpecificity - leftSpecificity
+      || singlePointEvidenceScore(right) - singlePointEvidenceScore(left)
+      || left.node.label.localeCompare(right.node.label);
+  });
 
   const watchItems: DependencyRead["watch_items"] = graph.key_risks.map((risk) => ({ text: risk }));
   const ghostNodeIds = new Set(graph.nodes.filter((node) => node.type === "unnamed_dependency" || node.named === false).map((node) => node.id));
@@ -130,7 +145,7 @@ export function getDependencyRead(graph: GraphData, options: DependencyReadOptio
 /** The worker-facing claim-array form; UI callers can use the graph form above. */
 export function getDependencyReadFromClaims(ledger: LedgerGraph, options: DependencyReadOptions = {}) {
   const { graph, excludedClaimCount } = buildGraphFromClaims(ledger);
-  return getDependencyRead(graph, { excludedCount: options.excludedCount ?? excludedClaimCount });
+  return getDependencyRead(graph, { ...options, excludedCount: options.excludedCount ?? excludedClaimCount });
 }
 
 export function optionsFromAnalysisMeta(meta: AnalysisMeta): DependencyReadOptions {

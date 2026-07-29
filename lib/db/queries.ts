@@ -360,97 +360,81 @@ export type VerifiedCompanySummary = {
   verificationSummary: { humanVerified: number; machineValidated: number };
 };
 
-/** Lists companies that have a published document with retained claims. */
-export async function listVerifiedCompanies(db: DatabaseClient): Promise<VerifiedCompanySummary[]> {
-  const rows = await db
-    .select({
-      id: companies.id,
-      slug: companies.slug,
-      name: companies.name,
-      agency: documents.agency,
-      rating: documents.rating,
-      publishedDate: documents.publishedDate,
-      claimCount: sql<number>`count(${claims.id})::int`,
-      highRiskCount: sql<number>`count(*) filter (where ${claims.riskFlag} = 'high')::int`,
-      mediumRiskCount: sql<number>`count(*) filter (where ${claims.riskFlag} = 'medium')::int`,
-      lowRiskCount: sql<number>`count(*) filter (where ${claims.riskFlag} = 'low')::int`,
-      humanVerifiedCount: sql<number>`count(*) filter (where ${claims.verificationTier} = 'human_verified')::int`,
-      machineValidatedCount: sql<number>`count(*) filter (where ${claims.verificationTier} = 'machine_validated')::int`,
-    })
-    .from(companies)
-    .innerJoin(documents, and(eq(documents.companyId, companies.id), eq(documents.status, "published"), isLatestPublishedDocument()))
-    .innerJoin(claims, and(eq(claims.documentId, documents.id), inArray(claims.verificationTier, verifiedTiers)))
-    .groupBy(companies.id, documents.id)
-    .orderBy(companies.name);
+type LedgerGraphRow = {
+  companyId: string;
+  companyName: string;
+  documentId: string;
+  documentAgency: string | null;
+  documentRating: string | null;
+  documentPublishedDate: string | null;
+  documentMetadata: unknown;
+  excludedClaimCount: number;
+  claimId: string;
+  claimDocumentId: string;
+  claimCompanyId: string;
+  sourceEntityId: string;
+  targetEntityId: string;
+  relationType: string;
+  relationLabel: string;
+  exposurePct: string | null;
+  riskFlag: string | null;
+  quote: string;
+  page: number | null;
+  observedDate: string;
+  extractionConfidence: string | null;
+  verificationTier: string;
+  sourceCanonicalName: string;
+  sourceNormalizedName: string;
+  sourceEntityType: string;
+  sourceCompanyId: string | null;
+  targetCanonicalName: string;
+  targetNormalizedName: string;
+  targetEntityType: string;
+  targetCompanyId: string | null;
+  sourceAlias: string | null;
+  targetAlias: string | null;
+};
 
-  return rows.map((row) => ({
-    id: row.id,
-    slug: row.slug,
-    name: row.name,
-    agency: row.agency,
-    rating: row.rating,
-    publishedDate: row.publishedDate,
-    claimCount: row.claimCount,
-    riskSummary: { high: row.highRiskCount, medium: row.mediumRiskCount, low: row.lowRiskCount },
-    verificationSummary: { humanVerified: row.humanVerifiedCount, machineValidated: row.machineValidatedCount },
-  }));
-}
+const ledgerGraphFields = {
+  companyId: companies.id,
+  companyName: companies.name,
+  documentId: documents.id,
+  documentAgency: documents.agency,
+  documentRating: documents.rating,
+  documentPublishedDate: documents.publishedDate,
+  documentMetadata: documents.metadata,
+  excludedClaimCount: sql<number>`(
+    select count(*)::int from ${claims} excluded_claim
+    where excluded_claim.document_id = ${documents.id}
+      and excluded_claim.verification_tier = 'excluded'
+  )`,
+  claimId: claims.id,
+  claimDocumentId: claims.documentId,
+  claimCompanyId: claims.companyId,
+  sourceEntityId: claims.sourceEntityId,
+  targetEntityId: claims.targetEntityId,
+  relationType: claims.relationType,
+  relationLabel: claims.relationLabel,
+  exposurePct: claims.exposurePct,
+  riskFlag: claims.riskFlag,
+  quote: claims.quote,
+  page: claims.page,
+  observedDate: claims.observedDate,
+  extractionConfidence: claims.extractionConfidence,
+  verificationTier: claims.verificationTier,
+  sourceCanonicalName: sourceEntities.canonicalName,
+  sourceNormalizedName: sourceEntities.normalizedName,
+  sourceEntityType: sourceEntities.entityType,
+  sourceCompanyId: sourceEntities.companyId,
+  targetCanonicalName: targetEntities.canonicalName,
+  targetNormalizedName: targetEntities.normalizedName,
+  targetEntityType: targetEntities.entityType,
+  targetCompanyId: targetEntities.companyId,
+  sourceAlias: sourceAliases.rawName,
+  targetAlias: targetAliases.rawName,
+};
 
-/**
- * Retrieves one published company graph in a single joined query. Source-document
- * aliases preserve the original fixture labels even after a curated merge changes
- * an entity's canonical display name.
- */
-export async function getCompanyGraph(db: DatabaseClient, slug: string): Promise<LedgerGraph | null> {
-  const rows = await db
-    .select({
-      companyId: companies.id,
-      companyName: companies.name,
-      documentId: documents.id,
-      documentAgency: documents.agency,
-      documentRating: documents.rating,
-      documentPublishedDate: documents.publishedDate,
-      documentMetadata: documents.metadata,
-      excludedClaimCount: sql<number>`(
-        select count(*)::int from ${claims} excluded_claim
-        where excluded_claim.document_id = ${documents.id}
-          and excluded_claim.verification_tier = 'excluded'
-      )`,
-      claimId: claims.id,
-      claimDocumentId: claims.documentId,
-      claimCompanyId: claims.companyId,
-      sourceEntityId: claims.sourceEntityId,
-      targetEntityId: claims.targetEntityId,
-      relationType: claims.relationType,
-      relationLabel: claims.relationLabel,
-      exposurePct: claims.exposurePct,
-      riskFlag: claims.riskFlag,
-      quote: claims.quote,
-      page: claims.page,
-      observedDate: claims.observedDate,
-      extractionConfidence: claims.extractionConfidence,
-      verificationTier: claims.verificationTier,
-      sourceCanonicalName: sourceEntities.canonicalName,
-      sourceNormalizedName: sourceEntities.normalizedName,
-      sourceEntityType: sourceEntities.entityType,
-      sourceCompanyId: sourceEntities.companyId,
-      targetCanonicalName: targetEntities.canonicalName,
-      targetNormalizedName: targetEntities.normalizedName,
-      targetEntityType: targetEntities.entityType,
-      targetCompanyId: targetEntities.companyId,
-      sourceAlias: sourceAliases.rawName,
-      targetAlias: targetAliases.rawName,
-    })
-    .from(companies)
-    .innerJoin(documents, and(eq(documents.companyId, companies.id), eq(documents.status, "published"), isLatestPublishedDocument()))
-    .innerJoin(claims, and(eq(claims.documentId, documents.id), inArray(claims.verificationTier, verifiedTiers)))
-    .innerJoin(sourceEntities, eq(sourceEntities.id, claims.sourceEntityId))
-    .innerJoin(targetEntities, eq(targetEntities.id, claims.targetEntityId))
-    .leftJoin(sourceAliases, and(eq(sourceAliases.entityId, sourceEntities.id), eq(sourceAliases.sourceDocumentId, documents.id)))
-    .leftJoin(targetAliases, and(eq(targetAliases.entityId, targetEntities.id), eq(targetAliases.sourceDocumentId, documents.id)))
-    .where(eq(companies.slug, slug))
-    .orderBy(desc(documents.publishedDate), asc(claims.createdAt));
-
+function hydrateLedgerGraph(rows: readonly LedgerGraphRow[]): LedgerGraph | null {
   const first = rows[0];
   if (!first) return null;
 
@@ -504,6 +488,93 @@ export async function getCompanyGraph(db: DatabaseClient, slug: string): Promise
     entities: [...entityById.values()],
     excludedClaimCount: first.excludedClaimCount,
   };
+}
+
+/** Lists companies that have a published document with retained claims. */
+export async function listVerifiedCompanies(db: DatabaseClient): Promise<VerifiedCompanySummary[]> {
+  const rows = await db
+    .select({
+      id: companies.id,
+      slug: companies.slug,
+      name: companies.name,
+      agency: documents.agency,
+      rating: documents.rating,
+      publishedDate: documents.publishedDate,
+      claimCount: sql<number>`count(${claims.id})::int`,
+      highRiskCount: sql<number>`count(*) filter (where ${claims.riskFlag} = 'high')::int`,
+      mediumRiskCount: sql<number>`count(*) filter (where ${claims.riskFlag} = 'medium')::int`,
+      lowRiskCount: sql<number>`count(*) filter (where ${claims.riskFlag} = 'low')::int`,
+      humanVerifiedCount: sql<number>`count(*) filter (where ${claims.verificationTier} = 'human_verified')::int`,
+      machineValidatedCount: sql<number>`count(*) filter (where ${claims.verificationTier} = 'machine_validated')::int`,
+    })
+    .from(companies)
+    .innerJoin(documents, and(eq(documents.companyId, companies.id), eq(documents.status, "published"), isLatestPublishedDocument()))
+    .innerJoin(claims, and(eq(claims.documentId, documents.id), inArray(claims.verificationTier, verifiedTiers)))
+    .groupBy(companies.id, documents.id)
+    .orderBy(companies.name);
+
+  return rows.map((row) => ({
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    agency: row.agency,
+    rating: row.rating,
+    publishedDate: row.publishedDate,
+    claimCount: row.claimCount,
+    riskSummary: { high: row.highRiskCount, medium: row.mediumRiskCount, low: row.lowRiskCount },
+    verificationSummary: { humanVerified: row.humanVerifiedCount, machineValidated: row.machineValidatedCount },
+  }));
+}
+
+/**
+ * Retrieves one published company graph in a single joined query. Source-document
+ * aliases preserve the original fixture labels even after a curated merge changes
+ * an entity's canonical display name.
+ */
+export async function getCompanyGraph(db: DatabaseClient, slug: string): Promise<LedgerGraph | null> {
+  const rows = await db
+    .select(ledgerGraphFields)
+    .from(companies)
+    .innerJoin(documents, and(eq(documents.companyId, companies.id), eq(documents.status, "published"), isLatestPublishedDocument()))
+    .innerJoin(claims, and(eq(claims.documentId, documents.id), inArray(claims.verificationTier, verifiedTiers)))
+    .innerJoin(sourceEntities, eq(sourceEntities.id, claims.sourceEntityId))
+    .innerJoin(targetEntities, eq(targetEntities.id, claims.targetEntityId))
+    .leftJoin(sourceAliases, and(eq(sourceAliases.entityId, sourceEntities.id), eq(sourceAliases.sourceDocumentId, documents.id)))
+    .leftJoin(targetAliases, and(eq(targetAliases.entityId, targetEntities.id), eq(targetAliases.sourceDocumentId, documents.id)))
+    .where(eq(companies.slug, slug))
+    .orderBy(desc(documents.publishedDate), asc(claims.createdAt));
+
+  return hydrateLedgerGraph(rows);
+}
+
+/**
+ * Returns every published, retained document for merge-aware corpus analysis.
+ * The company picker deliberately uses getCompanyGraph's latest-document view;
+ * specificity instead needs the full published document corpus.
+ */
+export async function listPublishedCorpusGraphs(db: DatabaseClient): Promise<LedgerGraph[]> {
+  const rows = await db
+    .select(ledgerGraphFields)
+    .from(documents)
+    .innerJoin(companies, eq(companies.id, documents.companyId))
+    .innerJoin(claims, and(eq(claims.documentId, documents.id), inArray(claims.verificationTier, verifiedTiers)))
+    .innerJoin(sourceEntities, eq(sourceEntities.id, claims.sourceEntityId))
+    .innerJoin(targetEntities, eq(targetEntities.id, claims.targetEntityId))
+    .leftJoin(sourceAliases, and(eq(sourceAliases.entityId, sourceEntities.id), eq(sourceAliases.sourceDocumentId, documents.id)))
+    .leftJoin(targetAliases, and(eq(targetAliases.entityId, targetEntities.id), eq(targetAliases.sourceDocumentId, documents.id)))
+    .where(eq(documents.status, "published"))
+    .orderBy(desc(documents.publishedDate), asc(documents.createdAt), asc(claims.createdAt));
+
+  const rowsByDocumentId = new Map<string, LedgerGraphRow[]>();
+  for (const row of rows) {
+    const documentRows = rowsByDocumentId.get(row.documentId) ?? [];
+    documentRows.push(row);
+    rowsByDocumentId.set(row.documentId, documentRows);
+  }
+  return [...rowsByDocumentId.values()].flatMap((documentRows) => {
+    const ledger = hydrateLedgerGraph(documentRows);
+    return ledger ? [ledger] : [];
+  });
 }
 
 export async function listEntityMerges(db: DatabaseClient): Promise<EntityMerge[]> {
