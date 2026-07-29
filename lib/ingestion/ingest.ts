@@ -12,6 +12,7 @@ import { normalizeEntityName } from "@/lib/entity-normalization";
 
 import { classifyDocument, collectClassificationSignals, type DocumentClassification, type DocumentType } from "./classify";
 import { reconcileClaimInserts } from "./claim-reconciliation";
+import { extractionTelemetry, storedExtractionTelemetry, type ExtractionTelemetry } from "./extraction-telemetry";
 import { mergeRejectedQuoteDiagnostics, type RejectedQuoteDiagnostic } from "./quote-mismatches";
 import { isMalformedDualTargetEdge, resolveGraphEntities, relationTypeFor } from "./resolve-entities";
 import { downloadDocumentPdf, uploadDocumentPdf } from "./storage";
@@ -53,6 +54,7 @@ export type IngestDocumentResult = {
   docType: string | null;
   resumedFrom?: string;
   reason?: string;
+  extractionTelemetry?: ExtractionTelemetry;
 };
 
 type PdfInput = { bytes: Buffer; title: string; url: string | null };
@@ -173,6 +175,7 @@ async function storedDocumentCounts(db: DatabaseClient, document: typeof documen
     // Preserve the result contract used for a fresh ingestion: this is the
     // number of edges validation excluded before they became ledger claims.
     excludedCount: storedValidationExclusionCount(document.metadata),
+    extractionTelemetry: storedExtractionTelemetry(document.metadata),
   };
 }
 
@@ -268,6 +271,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
         ? (await db.select({ name: companies.name }).from(companies).where(eq(companies.id, prepared.document.companyId)).limit(1))[0]?.name ?? null
         : null,
       docType: prepared.document.docType,
+      extractionTelemetry: existingCounts.extractionTelemetry,
       reason: `Duplicate: document already has durable work at status '${prepared.document.status}'.`,
     };
   }
@@ -315,6 +319,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     }
 
     const extracted = await extractGraph(sourcePdf.bytes, text ?? await extractText(sourcePdf.bytes));
+    const telemetry = extractionTelemetry(extracted);
     const rejectedQuotes = mergeRejectedQuoteDiagnostics(
       storedRejectedQuoteDiagnostics(document.metadata),
       extracted.rejectedQuotes ?? [],
@@ -347,6 +352,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
         excluded: extracted.meta.excluded,
         rejected_quotes: rejectedQuotes,
         malformed_relationships: malformedRelationshipDiagnostics,
+        extraction: telemetry,
         // This server-only source text makes a claim's ±1 sentence context
         // reviewable without forcing every reviewer to open the source PDF.
         extractedText: extracted.text.fullText,
@@ -370,6 +376,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
         excluded: extracted.meta.excluded,
         rejected_quotes: rejectedQuotes,
         malformed_relationships: malformedRelationshipDiagnostics,
+        extraction: telemetry,
         extractedText: extracted.text.fullText,
         keyRisks: extracted.graph.key_risks,
         reportDateRaw: extracted.graph.report_date,
@@ -416,7 +423,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     await seedKnownEntityMergeRejections(db);
     await advanceDocumentStatus(db, document.id, "resolved");
     await advanceDocumentStatus(db, document.id, "ready_for_review");
-    return { outcome: "ready_for_review", documentId: document.id, sha256, status: "ready_for_review", claimCount: reconciliation.counts.new_claims, excludedCount: extracted.meta.excluded.length, company: company.name, docType: classification.docType, resumedFrom: prepared.resumedFrom };
+    return { outcome: "ready_for_review", documentId: document.id, sha256, status: "ready_for_review", claimCount: reconciliation.counts.new_claims, excludedCount: extracted.meta.excluded.length, company: company.name, docType: classification.docType, resumedFrom: prepared.resumedFrom, extractionTelemetry: telemetry };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Sutra document ingestion failed", { documentId: document.id, sha256, message });

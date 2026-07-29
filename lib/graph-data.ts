@@ -43,8 +43,18 @@ export const graphDataSchema = z
           source_page: z.number().int().positive().nullable(),
           confidence: z.enum(["high", "medium"]),
         })
-        .strict(),
+      .strict(),
     ),
+    // The response contract asks the model to report all group-list entities it
+    // saw, including the low-value ones it correctly omitted under the cap.
+    // Optional keeps the static Day-2 corpus compatible; live Structured Output
+    // responses are required to supply it.
+    relationship_summary: z
+      .object({
+        group_structure_total_seen: z.number().int().nonnegative(),
+      })
+      .strict()
+      .optional(),
     key_risks: z.array(z.string()),
   })
   .strict();

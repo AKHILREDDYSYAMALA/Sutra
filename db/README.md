@@ -129,6 +129,31 @@ it represents a human decision and remains final during reconciliation.
 prompt versions, reconciliation counts, quote variants, and IDs of newly added
 claims for every successful run.
 
+### Recall telemetry and group-structure cap
+
+The extraction response ceiling is 12,000 tokens. A response at or above 90%
+of that ceiling logs a server warning and records `documents.metadata.extraction`
+with token usage, `near_token_ceiling`, counts for every relation type, and the
+model's total named subsidiary/group-company count. Batch ingestion prints this
+coverage, including a structure-heavy/no-dependency review marker.
+
+Subsidiary and `group_company` edges are capped at five combined. The model is
+instructed to retain only substantive operational or financial links and report
+the complete group-list count; a deterministic fallback enforces the cap if it
+does not comply. Customer, supplier, lender, parent, and unnamed-dependency
+edges are never capped.
+
+When a response reports more than five group relationships but returns no
+customer, supplier, lender, parent, or unnamed dependency, Sutra automatically
+runs one bounded counterparty-only coverage sweep over the same PDF. It is
+merged before strict quote validation and the normal append-only reconciliation;
+the metadata records that the sweep ran.
+
+To run the additive reconciliation pass after a ceiling or cap change, use
+`npm run ingest:reprocess -- --id <documentId> --trigger <reason>`. Operators
+can rerun every ready-for-review rationale recorded as near the ceiling with
+`npm run ingest:reprocess -- --near-token-ceiling --trigger <reason>`.
+
 Published documents are intentionally rejected by this command until the
 review-batch UI ships: that UI will keep the document `published`, expose only
 the new claim IDs from its reprocess entry for review, and leave earlier public

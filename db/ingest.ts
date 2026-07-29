@@ -7,6 +7,7 @@ import { eq, sql } from "drizzle-orm";
 import { claims, companies, documents } from "./schema";
 import { createDatabaseClient } from "../lib/db/client";
 import { ingestDocument, retryDocument, sourceForUrl, type IngestSource } from "../lib/ingestion/ingest";
+import { storedExtractionTelemetry, type ExtractionTelemetry } from "../lib/ingestion/extraction-telemetry";
 import { requiredDirectUrl } from "./env";
 
 type SummaryRow = {
@@ -17,6 +18,9 @@ type SummaryRow = {
   excluded: number | string;
   status: string;
   review?: string;
+  relation_counts?: string;
+  group_structure_seen?: number | string;
+  near_token_ceiling?: string;
   note?: string;
 };
 
@@ -33,9 +37,26 @@ function isPdf(filePath: string) {
   return path.extname(filePath).toLowerCase() === ".pdf";
 }
 
-function thinExtractionMarker(docType: string | null, claimCount: number) {
-  return docType === "rating_rationale" && claimCount < 3 ? "review: unusually thin" : "";
+function relationCountsSummary(telemetry: ExtractionTelemetry | undefined) {
+  if (!telemetry) return "—";
+  const counts = telemetry.model_returned_relation_counts;
+  return `customer:${counts.customer} supplier:${counts.supplier} lender:${counts.lender} parent:${counts.parent} subsidiary:${counts.subsidiary} group:${counts.group_company} unnamed:${counts.unnamed_dependency}`;
 }
+
+function coverageReviewMarker(docType: string | null, claimCount: number, telemetry?: ExtractionTelemetry) {
+  const markers: string[] = [];
+  if (docType === "rating_rationale" && claimCount < 3) markers.push("review: unusually thin");
+  if (telemetry?.near_token_ceiling) markers.push("review: near output ceiling");
+  const counts = telemetry?.model_returned_relation_counts;
+  const structureOnly = (counts?.subsidiary ?? 0) + (counts?.group_company ?? 0) > 0
+    && (counts?.customer ?? 0) + (counts?.supplier ?? 0) + (counts?.lender ?? 0) === 0;
+  if (structureOnly && (telemetry?.group_structure_total_seen ?? 0) > GROUP_STRUCTURE_WARNING_FLOOR) {
+    markers.push("review: structure-heavy; no customer/supplier/lender");
+  }
+  return markers.join("; ");
+}
+
+const GROUP_STRUCTURE_WARNING_FLOOR = 5;
 
 function sourceFromArg(value: string | undefined, fallback: IngestSource): IngestSource {
   if (!value) return fallback;
@@ -77,6 +98,7 @@ async function existingDocumentSummary(
     && Array.isArray((existing.metadata as { excluded?: unknown }).excluded)
     ? (existing.metadata as { excluded: unknown[] }).excluded.length
     : 0;
+  const telemetry = storedExtractionTelemetry(existing.metadata);
   return {
     file: "",
     company: existing.companyName ?? "—",
@@ -84,7 +106,10 @@ async function existingDocumentSummary(
     claims: counts?.claimCount ?? 0,
     excluded: validationExclusions,
     status: `skipped (${existing.status})`,
-    review: thinExtractionMarker(existing.docType, counts?.claimCount ?? 0),
+    review: coverageReviewMarker(existing.docType, counts?.claimCount ?? 0, telemetry),
+    relation_counts: relationCountsSummary(telemetry),
+    group_structure_seen: telemetry?.group_structure_total_seen ?? "—",
+    near_token_ceiling: telemetry?.near_token_ceiling === null || telemetry?.near_token_ceiling === undefined ? "—" : String(telemetry.near_token_ceiling),
   };
 }
 
@@ -143,7 +168,10 @@ async function ingestDirectory(
         claims: result.claimCount,
         excluded: result.excludedCount,
         status: result.outcome === "duplicate" ? `skipped (${result.status})` : result.status,
-        review: thinExtractionMarker(result.docType, result.claimCount),
+        review: coverageReviewMarker(result.docType, result.claimCount, result.extractionTelemetry),
+        relation_counts: relationCountsSummary(result.extractionTelemetry),
+        group_structure_seen: result.extractionTelemetry?.group_structure_total_seen ?? "—",
+        near_token_ceiling: result.extractionTelemetry?.near_token_ceiling === null || result.extractionTelemetry?.near_token_ceiling === undefined ? "—" : String(result.extractionTelemetry.near_token_ceiling),
         note: result.reason,
       });
     } catch (error) {

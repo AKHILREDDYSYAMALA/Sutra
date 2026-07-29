@@ -6,6 +6,7 @@ import { getDb, type DatabaseClient } from "@/lib/db";
 import { extract, extractPdfText } from "@/lib/extraction/extract";
 
 import { reconcileClaimInserts, type ReconciliationCounts, type QuoteVariant } from "./claim-reconciliation";
+import { extractionTelemetry, type ExtractionTelemetry } from "./extraction-telemetry";
 import { mergeRejectedQuoteDiagnostics, type RejectedQuoteDiagnostic } from "./quote-mismatches";
 import { isMalformedDualTargetEdge, resolveGraphEntities, relationTypeFor } from "./resolve-entities";
 import { downloadDocumentPdf } from "./storage";
@@ -18,6 +19,7 @@ export type ReprocessDocumentResult = {
   reconciliation: ReconciliationCounts;
   quoteVariantCount: number;
   newClaimIds: string[];
+  extractionTelemetry: ExtractionTelemetry;
 };
 
 function metadataObject(value: unknown): Record<string, unknown> {
@@ -98,6 +100,7 @@ export async function reprocessDocument(input: {
   const fileBuffer = await downloadPdf(document.storagePath);
   const text = await extractText(fileBuffer);
   const extracted = await extractGraph(fileBuffer, text);
+  const telemetry = extractionTelemetry(extracted);
   const relationshipData = malformedRelationshipDiagnostics(extracted.graph);
   const reprocessedAt = new Date().toISOString();
 
@@ -153,11 +156,13 @@ export async function reprocessDocument(input: {
       quote_variants: reconciliation.quoteVariants satisfies QuoteVariant[],
       new_claim_ids: reconciliation.insertedClaimIds,
       malformed_relationships: relationshipData.diagnostics,
+      extraction: telemetry,
     };
     await tx.update(documents).set({
       metadata: {
         ...metadataObject(locked.metadata),
         rejected_quotes: rejectedQuotes,
+        extraction: telemetry,
         reprocess: [...existingReprocesses(locked.metadata), reprocessEntry],
       },
       updatedAt: sql`now()`,
@@ -172,5 +177,6 @@ export async function reprocessDocument(input: {
     reconciliation: result.counts,
     quoteVariantCount: result.quoteVariants.length,
     newClaimIds: result.insertedClaimIds,
+    extractionTelemetry: telemetry,
   };
 }

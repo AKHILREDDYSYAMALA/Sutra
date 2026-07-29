@@ -35,16 +35,21 @@ When the result field is a graph object, it has this schema:
       "confidence": "high | medium — high only if the relationship is stated in one explicit sentence; medium if assembled from adjacent sentences"
     }
   ],
+  "relationship_summary": {
+    "group_structure_total_seen": "integer — total explicitly named subsidiary and group_company relationships encountered anywhere in the report, including those omitted from edges under the cap"
+  },
   "key_risks": ["concentration/dependency risks the report explicitly flags, one sentence each, paraphrased"]
 }
 
 Rules:
+- Scan the complete report for customers, suppliers, lenders, parents, and concrete unnamed dependencies before considering group structure. Return every evidence-backed relationship of those types, in that priority order. Do not stop after finding a consolidation-scope list or assume it is the report's only relationship evidence.
 - source_quote is non-negotiable and must be copyable verbatim from the text — it will be programmatically validated against the source, and edges with non-matching quotes are discarded.
 - Generic statements like "diversified customer base" become a key_risks note, not an edge.
 - If the report explicitly describes an unnamed dependency — such as import suppliers, supplier credit, or imported components — add one unnamed_dependency node with named set to false. Its label must state the limitation honestly, for example: "Unnamed import suppliers · 25–30% of purchases". Never invent a supplier name or present a generic category as a named entity.
 - Only add an unnamed dependency when the report gives a concrete relationship or exposure. Its edge still requires a verbatim source_quote and source_page like every other edge.
 - Banks/lenders are nodes only if named specifically.
 - The target company is always a node with type "target".
+- Subsidiaries and group companies are group composition, not ordinarily dependency evidence. Only after the dependency scan, extract at most 5 subsidiary or group_company edges combined. Select only the entities discussed substantively (for example, named revenue contribution, operational linkage, financial support, or an obligation), not the first names in a consolidation-scope list. Do not cap customers, suppliers, lenders, parents, or unnamed dependencies. Always set relationship_summary.group_structure_total_seen to the total number of explicitly named subsidiary/group-company relationships you encountered, including omitted list-only names; use 0 when none were found.
 - If the document is not a credit rating report, return: {"result": {"error": "not_a_rating_report"}}.
 - source_page must match the [[PAGE n]] marker containing the quote, otherwise use null.`;
 

@@ -471,9 +471,14 @@ New Named Lender sanctioned the facility.`;
       const [olectraDocument] = await tx.select().from(documents).where(eq(documents.id, olectraResult.documentId));
       assert.equal(olectraDocument?.source, "india_ratings");
       assert.equal(olectraDocument?.status, "ready_for_review");
-      const metadata = olectraDocument?.metadata as { classification?: { docType?: string; signals?: { rationaleSubstanceHeadings?: string[] } } };
+      const metadata = olectraDocument?.metadata as {
+        classification?: { docType?: string; signals?: { rationaleSubstanceHeadings?: string[] } };
+        extraction?: { relation_type_counts?: { customer?: number }; near_token_ceiling?: boolean | null };
+      };
       assert.equal(metadata.classification?.docType, "rating_rationale");
       assert.ok(metadata.classification?.signals?.rationaleSubstanceHeadings?.includes("Detailed Rationale of the Rating Action"));
+      assert.equal(metadata.extraction?.relation_type_counts?.customer, 1);
+      assert.equal(metadata.extraction?.near_token_ceiling, null, "fixtures without provider usage retain an explicit unknown telemetry state");
       const olectraClaims = await tx.select().from(claims).where(eq(claims.documentId, olectraResult.documentId));
       assert.equal(olectraClaims.length, 1);
       assert.equal(olectraClaims[0]?.verificationTier, "machine_validated");

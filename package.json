@@ -32,7 +32,7 @@
     "ingest:reclassify": "tsx db/ingest-reclassify.ts",
     "ingest:reprocess": "tsx db/ingest-reprocess.ts",
     "ingest:mismatches": "tsx db/ingest-mismatches.ts",
-    "test:ingestion": "tsx --test lib/ingestion/*.test.ts",
+    "test:ingestion": "tsx --test lib/ingestion/*.test.ts lib/extraction/*.test.ts",
     "verify:parity": "tsx scripts/verify-ui-parity.mjs",
     "test:entity-normalization": "tsx --test lib/entity-normalization.test.ts",
     "test:domain": "tsx --test lib/domain/*.test.ts"

@@ -46,9 +46,17 @@ const graphSchema = {
     agency: nullable({ type: "string", enum: ["CRISIL", "ICRA", "CARE", "India Ratings"] }),
     nodes: { type: "array", items: nodeSchema },
     edges: { type: "array", items: edgeSchema },
+    relationship_summary: {
+      type: "object",
+      properties: {
+        group_structure_total_seen: { type: "integer", minimum: 0 },
+      },
+      required: ["group_structure_total_seen"],
+      additionalProperties: false,
+    },
     key_risks: { type: "array", items: { type: "string" } },
   },
-  required: ["target_company", "rating", "report_date", "agency", "nodes", "edges", "key_risks"],
+  required: ["target_company", "rating", "report_date", "agency", "nodes", "edges", "relationship_summary", "key_risks"],
   additionalProperties: false,
 };
 
