@@ -21,12 +21,23 @@ const CORPORATE_SUFFIXES = new Set([
 ]);
 
 /**
+ * PDFs and OCR occasionally put a space inside an all-caps acronym ("BL W").
+ * Rejoin only runs made of one- or two-letter uppercase tokens; ordinary words
+ * and legal suffixes are left untouched.
+ */
+export function canonicalizeEntityName(raw: string): string {
+  return raw
+    .trim()
+    .replace(/\b(?:[A-Z]{1,2}\s+){1,}[A-Z]\b/g, (acronym) => acronym.replace(/\s+/g, ""));
+}
+
+/**
  * Produces the stable identity key used by entities.normalized_name. It is
  * intentionally conservative: it removes legal suffixes, not meaningful name
  * tokens such as "electronics" or "defence".
  */
 export function normalizeEntityName(raw: string): string {
-  const normalized = raw
+  const normalized = canonicalizeEntityName(raw)
     .toLowerCase()
     .trim()
     .replace(/[.,&'"]/g, "")

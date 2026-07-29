@@ -4,6 +4,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { companies, discoveredAnnouncements, documents, watcherState } from "@/db/schema";
 import type { DatabaseClient } from "@/lib/db";
+import { normalizeEntityName } from "@/lib/entity-normalization";
 
 import { BSE_MIN_POLL_INTERVAL_MS, BseClient, type Announcement } from "./client";
 
@@ -27,6 +28,11 @@ export function isRatingAnnouncement(announcement: Pick<Announcement, "headline"
   return ratingLanguage.test([announcement.headline, announcement.category, announcement.subCategory].filter(Boolean).join(" "));
 }
 
+/** Guard against a mistyped manual scrip mapping attaching another company's filings. */
+export function bseCompanyNameMatches(mappedCompanyName: string, announcementCompanyName: string) {
+  return normalizeEntityName(mappedCompanyName) === normalizeEntityName(announcementCompanyName);
+}
+
 function provisionalHash(announcement: Announcement) {
   return createHash("sha256").update(`bse-announcement:${announcement.bseAnnouncementId}`).digest("hex");
 }
@@ -35,7 +41,13 @@ function since(state: typeof watcherState.$inferSelect | undefined) {
   return state?.lastAnnouncementDate ?? new Date(Date.now() - initialLookbackMs);
 }
 
-async function recordAnnouncement(db: DatabaseClient, companyId: string, announcement: Announcement, status: "new" | "ignored") {
+async function recordAnnouncement(
+  db: DatabaseClient,
+  companyId: string,
+  announcement: Announcement,
+  status: "new" | "ignored" | "failed",
+  failureReason: string | null = null,
+) {
   const [saved] = await db.insert(discoveredAnnouncements).values({
     source: "bse",
     externalId: announcement.bseAnnouncementId,
@@ -47,6 +59,7 @@ async function recordAnnouncement(db: DatabaseClient, companyId: string, announc
     attachmentUrl: announcement.attachmentUrl,
     rawPayload: announcement.rawPayload,
     status,
+    failureReason,
   }).onConflictDoUpdate({
     target: [discoveredAnnouncements.source, discoveredAnnouncements.externalId],
     set: {
@@ -56,6 +69,8 @@ async function recordAnnouncement(db: DatabaseClient, companyId: string, announc
       announcementDate: announcement.announcementDate,
       attachmentUrl: announcement.attachmentUrl,
       rawPayload: announcement.rawPayload,
+      status: sql`case when ${discoveredAnnouncements.documentId} is null then ${status} else ${discoveredAnnouncements.status} end`,
+      failureReason,
     },
   }).returning();
   if (!saved) throw new Error(`Could not record BSE announcement ${announcement.bseAnnouncementId}.`);
@@ -87,6 +102,14 @@ export async function watchBse(input: { db: DatabaseClient; dryRun?: boolean; cl
       for (const announcement of announcements) {
         summary.announcementsSeen += 1;
         if (!latestAnnouncementDate || announcement.announcementDate > latestAnnouncementDate) latestAnnouncementDate = announcement.announcementDate;
+        if (!bseCompanyNameMatches(company.name, announcement.companyName)) {
+          const mismatch = `BSE scrip-name mismatch: mapped '${company.name}' but announcement names '${announcement.companyName}' (scrip ${company.bseScripCode}).`;
+          await recordAnnouncement(db, company.id, announcement, "failed", mismatch);
+          summary.failures += 1;
+          errors.push(`${company.slug}: ${mismatch}`);
+          console.error(JSON.stringify({ source: "bse", event: "scrip_name_mismatch", company: company.slug, mapped_name: company.name, announcement_name: announcement.companyName, scrip_code: company.bseScripCode, announcement_id: announcement.bseAnnouncementId }));
+          continue;
+        }
         const relevant = isRatingAnnouncement(announcement);
         const saved = await recordAnnouncement(db, company.id, announcement, relevant && announcement.attachmentUrl ? "new" : "ignored");
         if (!relevant || !announcement.attachmentUrl) {
@@ -152,6 +175,7 @@ export async function listBseWatchStatus(db: DatabaseClient) {
     id: discoveredAnnouncements.id, externalId: discoveredAnnouncements.externalId, headline: discoveredAnnouncements.headline,
     status: discoveredAnnouncements.status, announcementDate: discoveredAnnouncements.announcementDate,
     company: companies.name, scripCode: discoveredAnnouncements.scripCode, documentId: discoveredAnnouncements.documentId,
+    failureReason: discoveredAnnouncements.failureReason,
   }).from(discoveredAnnouncements).leftJoin(companies, eq(discoveredAnnouncements.companyId, companies.id))
     .where(eq(discoveredAnnouncements.source, "bse")).orderBy(sql`${discoveredAnnouncements.createdAt} desc`).limit(20);
   return { state: state[0] ?? null, announcements };

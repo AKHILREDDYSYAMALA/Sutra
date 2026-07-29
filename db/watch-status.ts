@@ -7,7 +7,7 @@ async function main() {
   try {
     const { state, announcements } = await listBseWatchStatus(db);
     console.log("watcher_state", state ?? "not yet polled");
-    console.table(announcements.map((row) => ({ id: row.id, company: row.company ?? "—", scrip_code: row.scripCode, status: row.status, announcement_date: row.announcementDate.toISOString(), headline: row.headline, document_id: row.documentId ?? "—" })));
+    console.table(announcements.map((row) => ({ id: row.id, company: row.company ?? "—", scrip_code: row.scripCode, status: row.status, announcement_date: row.announcementDate.toISOString(), headline: row.headline, document_id: row.documentId ?? "—", failure_reason: row.failureReason ?? "—" })));
   } finally { await client.end({ timeout: 5 }); }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

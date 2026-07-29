@@ -30,6 +30,12 @@ the JSON host returned HTTP 406 to a non-browser request; that response is
 treated as a retryable acquisition failure and surfaces in `watcher_state`.
 
 Responses have `Table` (announcement rows) and `Table1[0].ROWCNT` (total rows).
+
+Before an announcement can be linked to a document, the watcher normalizes its
+`SLONGNAME` and compares it with the manually mapped company name for that scrip
+code. A mismatch is recorded as `failed`, including both names and the scrip code,
+and no document is created or linked. This makes a mistyped scrip code visible
+without ever attaching another company's filing.
 Rows observed by the site use fields such as `NEWSID`, `SCRIP_CD`, `SLONGNAME`,
 `NEWSSUB`, `CATEGORYNAME`, `DissemDT` and `ATTACHMENTNAME`; `parseAnnouncement`
 is the only code that understands those payload names. Attachment names are

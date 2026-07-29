@@ -8,7 +8,7 @@ import { seedKnownEntityMergeRejections } from "@/db/known-entity-rejections";
 import { parseReportDate, slugify } from "@/db/static-graphs";
 import { advanceDocumentStatus, getDb, scheduleDocumentRetry, type DatabaseClient } from "@/lib/db";
 import { extract, extractPdfText, type ExtractedDocument, type ExtractedPdfText } from "@/lib/extraction/extract";
-import { normalizeEntityName } from "@/lib/entity-normalization";
+import { canonicalizeEntityName, normalizeEntityName } from "@/lib/entity-normalization";
 
 import { classifyDocument, collectClassificationSignals, type DocumentClassification, type DocumentType } from "./classify";
 import { reconcileClaimInserts } from "./claim-reconciliation";
@@ -130,16 +130,17 @@ async function loadPdf(input: IngestDocumentInput): Promise<PdfInput> {
 }
 
 async function findOrCreateCompany(db: DatabaseClient, name: string) {
-  const normalized = normalizeEntityName(name);
+  const canonicalName = canonicalizeEntityName(name);
+  const normalized = normalizeEntityName(canonicalName);
   const allCompanies = await db.select().from(companies);
   const existing = allCompanies.find((company) => normalizeEntityName(company.name) === normalized);
   if (existing) return { company: existing, path: "matched_existing" as const };
 
-  const baseSlug = slugify(name);
+  const baseSlug = slugify(canonicalName);
   let slug = baseSlug;
   let suffix = 2;
   while (allCompanies.some((company) => company.slug === slug)) slug = `${baseSlug}-${suffix++}`;
-  const [company] = await db.insert(companies).values({ name, slug }).returning();
+  const [company] = await db.insert(companies).values({ name: canonicalName, slug }).returning();
   if (!company) throw new Error(`Could not create company ${name}.`);
   return { company, path: "created" as const };
 }

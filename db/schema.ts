@@ -492,6 +492,7 @@ export const discoveredAnnouncements = pgTable(
     rawPayload: jsonb("raw_payload").notNull(),
     documentId: uuid("document_id").references(() => documents.id),
     status: text("status").notNull().default("new"),
+    failureReason: text("failure_reason"),
     createdAt: createdAt(),
   },
   (table) => [

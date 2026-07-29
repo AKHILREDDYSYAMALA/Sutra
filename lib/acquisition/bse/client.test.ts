@@ -3,7 +3,7 @@ import test from "node:test";
 
 import fixtures from "./fixtures/announcements.json";
 import { parseAnnouncement } from "./client";
-import { isRatingAnnouncement } from "./watcher";
+import { bseCompanyNameMatches, isRatingAnnouncement } from "./watcher";
 
 test("parseAnnouncement maps saved BSE announcement payloads", () => {
   const parsed = fixtures.map(parseAnnouncement);
@@ -18,4 +18,11 @@ test("parseAnnouncement maps saved BSE announcement payloads", () => {
 test("rating relevance is conservative and keeps non-rating announcements auditable", () => {
   assert.equal(isRatingAnnouncement({ headline: "India Ratings rating action", category: "Company Update", subCategory: null }), true);
   assert.equal(isRatingAnnouncement({ headline: "Issuance of duplicate share certificate", category: null, subCategory: null }), false);
+});
+
+test("BSE scrip guard accepts normalised names but rejects a different company", () => {
+  assert.equal(bseCompanyNameMatches("Sona BLW Precision Forgings Limited", "SONA BL W PRECISION FORGINGS LIMITED"), true);
+  assert.equal(bseCompanyNameMatches("Syrma SGS Technology Limited", "SYRMA SG S TECHNOLOGY LIMITED"), true);
+  assert.equal(bseCompanyNameMatches("PTC Industries Limited", "PTC INDUSTRIES LIMITED"), true);
+  assert.equal(bseCompanyNameMatches("Sona BLW Precision Forgings Limited", "Tata Motors Limited"), false);
 });
