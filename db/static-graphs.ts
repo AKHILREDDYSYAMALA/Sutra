@@ -172,26 +172,41 @@ export function parseReportDate(raw: string): string {
     return validatedIsoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]), raw);
   }
 
-  const longForm = /^(January|February|March|April|May|June|July|August|September|October|November|December) (\d{1,2}), (\d{4})$/.exec(raw);
-  if (longForm) {
-    const month = [
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
-    ].indexOf(longForm[1]!) + 1;
-    return validatedIsoDate(Number(longForm[3]), month, Number(longForm[2]), raw);
+  const monthNames = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+  ] as const;
+  const monthAbbreviations = [
+    "jan", "feb", "mar", "apr", "may", "jun",
+    "jul", "aug", "sep", "oct", "nov", "dec",
+  ] as const;
+  const monthNumber = (value: string) => {
+    const normalized = value.toLowerCase().replace(/\.$/, "");
+    const longIndex = monthNames.indexOf(normalized as typeof monthNames[number]);
+    if (longIndex >= 0) return longIndex + 1;
+    const abbreviatedIndex = monthAbbreviations.indexOf(normalized as typeof monthAbbreviations[number]);
+    return abbreviatedIndex >= 0 ? abbreviatedIndex + 1 : null;
+  };
+  // Strictly recognize a named month only; we do not hand the input to Date.parse.
+  const namedMonth = "(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan\\.?|Feb\\.?|Mar\\.?|Apr\\.?|May\\.?|Jun\\.?|Jul\\.?|Aug\\.?|Sep\\.?|Oct\\.?|Nov\\.?|Dec\\.?)";
+  const monthFirst = new RegExp(`^(${namedMonth}) (\\d{1,2}), (\\d{4})$`, "i").exec(raw);
+  if (monthFirst) {
+    const month = monthNumber(monthFirst[1]!);
+    if (month) return validatedIsoDate(Number(monthFirst[3]), month, Number(monthFirst[2]), raw);
   }
 
-  throw new Error(`Unsupported report_date ${JSON.stringify(raw)}. Expected YYYY-MM-DD or Month DD, YYYY.`);
+  const dayFirst = new RegExp(`^(\\d{1,2}) (${namedMonth}) (\\d{4})$`, "i").exec(raw);
+  if (dayFirst) {
+    const month = monthNumber(dayFirst[2]!);
+    if (month) return validatedIsoDate(Number(dayFirst[3]), month, Number(dayFirst[1]), raw);
+  }
+
+  const dayMonthYear = /^(\d{2})-(\d{2})-(\d{4})$/.exec(raw);
+  if (dayMonthYear) {
+    return validatedIsoDate(Number(dayMonthYear[3]), Number(dayMonthYear[2]), Number(dayMonthYear[1]), raw);
+  }
+
+  throw new Error(`Unsupported report_date ${JSON.stringify(raw)}. Expected YYYY-MM-DD, Month DD, YYYY, DD Month YYYY, or DD-MM-YYYY.`);
 }
 
 function validatedIsoDate(year: number, month: number, day: number, original: string): string {

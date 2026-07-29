@@ -113,3 +113,23 @@ test("corpus resolution follows a reversible entity merge without changing claim
   assert.equal(samsung.report_count, 2);
   assert.equal(amber.claims.some((claim) => claim.targetEntityId === "amber-enterprises:samsung"), true);
 });
+
+test("parseReportDate accepts only the documented strict date forms", () => {
+  assert.equal(parseReportDate("2026-06-25"), "2026-06-25");
+  assert.equal(parseReportDate("June 25, 2026"), "2026-06-25");
+  assert.equal(parseReportDate("25 June 2026"), "2026-06-25");
+  assert.equal(parseReportDate("25-06-2026"), "2026-06-25");
+
+  const abbreviations = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  abbreviations.forEach((month, index) => {
+    const expected = `2026-${String(index + 1).padStart(2, "0")}-01`;
+    assert.equal(parseReportDate(`${month} 1, 2026`), expected, month);
+    assert.equal(parseReportDate(`${month}. 1, 2026`), expected, `${month}.`);
+    assert.equal(parseReportDate(`1 ${month} 2026`), expected, `day-first ${month}`);
+    assert.equal(parseReportDate(`1 ${month}. 2026`), expected, `day-first ${month}.`);
+  });
+
+  ["2026/06/25", "25/06/2026", "June 25 2026", "25 June, 2026", "Junx 25, 2026", "2026-13-01"].forEach((value) => {
+    assert.throws(() => parseReportDate(value), /Unsupported report_date|Invalid report_date/, value);
+  });
+});

@@ -4,6 +4,7 @@ import { extractionConfig } from "@/lib/extraction-config";
 import { getExtractionSystemPrompt } from "@/lib/extraction-prompt";
 import { extractionResponseFormat } from "@/lib/extraction-schema";
 import { ensureGraphIntegrity } from "@/lib/graph-integrity";
+import { diagnoseRejectedQuotes, type RejectedQuoteDiagnostic } from "@/lib/ingestion/quote-mismatches";
 import {
   type AnalysisExclusion,
   graphDataSchema,
@@ -63,6 +64,8 @@ export type ExtractedDocument = {
   modelVersion: string;
   promptVersion: string;
   text: ExtractedPdfText;
+  /** Measurement-only diagnostics for edges strict quote validation rejected. */
+  rejectedQuotes?: RejectedQuoteDiagnostic[];
 };
 
 function labelledPages(pages: string[]) {
@@ -225,11 +228,16 @@ export async function extract(
     }
 
     const { graph: quoteValidatedGraph, droppedEdgeCount, droppedEdges } = validateGraphQuotes(parsed.data, text.fullText);
+    const rejectedQuotes = diagnoseRejectedQuotes(parsed.data, droppedEdges, text.fullText);
     const integrity = ensureGraphIntegrity(quoteValidatedGraph);
     const excluded = buildExclusions(parsed.data, droppedEdges, integrity);
     if (droppedEdgeCount > 0 || integrity.droppedEdges.length > 0 || integrity.repairedEdges.length > 0 || integrity.unlinkedNodeIds.length > 0 || integrity.duplicateNodeIds.length > 0) {
       console.warn("Sutra extraction integrity adjustments.", {
         quoteMismatch: droppedEdgeCount,
+        quoteMismatchBuckets: rejectedQuotes.reduce<Record<string, number>>((counts, entry) => {
+          counts[entry.reason_bucket] = (counts[entry.reason_bucket] ?? 0) + 1;
+          return counts;
+        }, {}),
         unresolvedEndpoint: integrity.droppedEdges.length,
         repairedEndpoint: integrity.repairedEdges.length,
         unlinkedNodes: integrity.unlinkedNodeIds,
@@ -245,6 +253,7 @@ export async function extract(
       modelVersion: extractionConfig.model,
       promptVersion: extractionPromptVersion,
       text,
+      rejectedQuotes,
     };
   } catch (error) {
     logExtractionMetrics(Date.now() - extractionStartedAt);

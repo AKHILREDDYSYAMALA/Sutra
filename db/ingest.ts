@@ -16,6 +16,7 @@ type SummaryRow = {
   claims: number | string;
   excluded: number | string;
   status: string;
+  review?: string;
   note?: string;
 };
 
@@ -30,6 +31,10 @@ function usage() {
 
 function isPdf(filePath: string) {
   return path.extname(filePath).toLowerCase() === ".pdf";
+}
+
+function thinExtractionMarker(docType: string | null, claimCount: number) {
+  return docType === "rating_rationale" && claimCount < 3 ? "review: unusually thin" : "";
 }
 
 function sourceFromArg(value: string | undefined, fallback: IngestSource): IngestSource {
@@ -79,6 +84,7 @@ async function existingDocumentSummary(
     claims: counts?.claimCount ?? 0,
     excluded: validationExclusions,
     status: `skipped (${existing.status})`,
+    review: thinExtractionMarker(existing.docType, counts?.claimCount ?? 0),
   };
 }
 
@@ -137,6 +143,7 @@ async function ingestDirectory(
         claims: result.claimCount,
         excluded: result.excludedCount,
         status: result.outcome === "duplicate" ? `skipped (${result.status})` : result.status,
+        review: thinExtractionMarker(result.docType, result.claimCount),
         note: result.reason,
       });
     } catch (error) {

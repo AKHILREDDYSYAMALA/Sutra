@@ -11,7 +11,8 @@ import { extract, extractPdfText, type ExtractedDocument, type ExtractedPdfText 
 import { normalizeEntityName } from "@/lib/entity-normalization";
 
 import { classifyDocument, collectClassificationSignals, type DocumentClassification, type DocumentType } from "./classify";
-import { resolveGraphEntities, relationTypeFor } from "./resolve-entities";
+import { mergeRejectedQuoteDiagnostics, type RejectedQuoteDiagnostic } from "./quote-mismatches";
+import { isMalformedDualTargetEdge, resolveGraphEntities, relationTypeFor } from "./resolve-entities";
 import { downloadDocumentPdf, uploadDocumentPdf } from "./storage";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -146,6 +147,16 @@ function documentMetadata(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
+function storedRejectedQuoteDiagnostics(value: unknown): RejectedQuoteDiagnostic[] {
+  const entries = documentMetadata(value).rejected_quotes;
+  if (!Array.isArray(entries)) return [];
+  return entries.filter((entry): entry is RejectedQuoteDiagnostic => Boolean(
+    entry && typeof entry === "object"
+      && typeof (entry as RejectedQuoteDiagnostic).model_quote === "string"
+      && typeof (entry as RejectedQuoteDiagnostic).reason_bucket === "string",
+  ));
+}
+
 function storedValidationExclusionCount(value: unknown) {
   const metadata = documentMetadata(value);
   return Array.isArray(metadata.excluded) ? metadata.excluded.length : 0;
@@ -264,7 +275,10 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
 
   try {
     if (stage === "discovered") {
-      const storagePath = await uploadPdf(sha256, sourcePdf.bytes);
+      // A resumed audit row already has the immutable hash-addressed PDF. Do
+      // not re-upload it (or depend on a Storage bucket round trip) before the
+      // actual retry work can begin.
+      const storagePath = document.storagePath ?? await uploadPdf(sha256, sourcePdf.bytes);
       await db.update(documents).set({ storagePath, fetchedAt: new Date(), updatedAt: sql`now()` }).where(eq(documents.id, document.id));
       await advanceDocumentStatus(db, document.id, "fetched");
       stage = "fetched";
@@ -300,12 +314,38 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     }
 
     const extracted = await extractGraph(sourcePdf.bytes, text ?? await extractText(sourcePdf.bytes));
+    const rejectedQuotes = mergeRejectedQuoteDiagnostics(
+      storedRejectedQuoteDiagnostics(document.metadata),
+      extracted.rejectedQuotes ?? [],
+    );
+    const extractedNodes = new Map(extracted.graph.nodes.map((node) => [node.id, node]));
+    // The ledger intentionally has no catch-all relationship type. Preserve a
+    // malformed dual-target edge for inspection, but never turn a prospective
+    // acquisition (or another model error) into a false group-company claim.
+    const malformedDualTargetEdges = extracted.graph.edges.filter((edge) => isMalformedDualTargetEdge(edge, extractedNodes));
+    const claimEdges = extracted.graph.edges.filter((edge) => !isMalformedDualTargetEdge(edge, extractedNodes));
+    const malformedRelationshipDiagnostics = malformedDualTargetEdges.map((edge) => ({
+      source: extractedNodes.get(edge.source)?.label ?? edge.source,
+      target: extractedNodes.get(edge.target)?.label ?? edge.target,
+      source_type: extractedNodes.get(edge.source)?.type ?? null,
+      target_type: extractedNodes.get(edge.target)?.type ?? null,
+      relation: edge.relation,
+      reason: "dual_target_edge_has_no_supported_claim_relation",
+    }));
+    if (malformedRelationshipDiagnostics.length > 0) {
+      console.warn("Sutra malformed relationship edges omitted from claims.", {
+        documentId: document.id,
+        edges: malformedRelationshipDiagnostics,
+      });
+    }
     await advanceDocumentStatus(db, document.id, "extracted");
     await db.update(documents).set({
       metadata: {
         ...documentMetadata(document.metadata),
         classification,
         excluded: extracted.meta.excluded,
+        rejected_quotes: rejectedQuotes,
+        malformed_relationships: malformedRelationshipDiagnostics,
         // This server-only source text makes a claim's ±1 sentence context
         // reviewable without forcing every reviewer to open the source PDF.
         extractedText: extracted.text.fullText,
@@ -327,6 +367,8 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
         ...documentMetadata(document.metadata),
         classification,
         excluded: extracted.meta.excluded,
+        rejected_quotes: rejectedQuotes,
+        malformed_relationships: malformedRelationshipDiagnostics,
         extractedText: extracted.text.fullText,
         keyRisks: extracted.graph.key_risks,
         reportDateRaw: extracted.graph.report_date,
@@ -336,14 +378,14 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
     }).where(eq(documents.id, document.id));
 
     const claimCount = await db.transaction(async (tx) => {
+      const claimNodeIds = new Set(claimEdges.flatMap((edge) => [edge.source, edge.target]));
       const entityByNodeId = await resolveGraphEntities(tx, {
         documentId: document.id,
         companyId: company.id,
-        nodes: extracted.graph.nodes,
+        nodes: extracted.graph.nodes.filter((node) => claimNodeIds.has(node.id)),
         resolvedBy: "deterministic",
       });
-      const nodes = new Map(extracted.graph.nodes.map((node) => [node.id, node]));
-      const rows = extracted.graph.edges.map((edge) => {
+      const rows = claimEdges.map((edge) => {
         const sourceEntityId = entityByNodeId.get(edge.source);
         const targetEntityId = entityByNodeId.get(edge.target);
         if (!sourceEntityId || !targetEntityId) throw new Error(`Could not resolve ${edge.source} -> ${edge.target}.`);
@@ -352,7 +394,7 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
           companyId: company.id,
           sourceEntityId,
           targetEntityId,
-          relationType: relationTypeFor(edge, nodes),
+          relationType: relationTypeFor(edge, extractedNodes),
           relationLabel: edge.relation,
           exposurePct: edge.exposure_pct === null ? null : String(edge.exposure_pct),
           riskFlag: edge.risk_flag,
@@ -387,18 +429,45 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
 /** Explicitly resumes an incomplete document without creating or deleting rows. */
 export async function retryDocument(input: { db?: DatabaseClient; documentId: string; forceType?: DocumentType }): Promise<IngestDocumentResult> {
   const db = input.db ?? getDb();
-  const [document] = await db.select().from(documents).where(eq(documents.id, input.documentId)).limit(1);
+  let [document] = await db.select().from(documents).where(eq(documents.id, input.documentId)).limit(1);
   if (!document) throw new Error(`Document ${input.documentId} was not found.`);
+  if (document.status === "validated") {
+    const [existingClaims] = await db.select({ count: sql<number>`count(*)::int` }).from(claims).where(eq(claims.documentId, document.id));
+    if ((existingClaims?.count ?? 0) > 0) {
+      throw new Error(`Document ${input.documentId} reached validated with claims already present; refusing to replay evidence.`);
+    }
+    // Resolution can fail after validation (for example, a date parse or an
+    // inbound relation mapper). There are no claims to duplicate yet, so an
+    // explicit retry records the failed branch then restarts from discovery.
+    const [restarted] = await db.transaction(async (tx) => {
+      await tx.update(documents).set({ status: "failed", updatedAt: sql`now()` }).where(eq(documents.id, document.id));
+      const [updated] = await tx.update(documents).set({
+        status: "discovered",
+        lastError: null,
+        nextAttemptAt: null,
+        metadata: {
+          ...documentMetadata(document.metadata),
+          retryRestart: { restartedAt: new Date().toISOString(), restartedFrom: "validated", reason: document.lastError },
+        },
+        updatedAt: sql`now()`,
+      }).where(eq(documents.id, document.id)).returning();
+      return [updated];
+    });
+    if (!restarted) throw new Error(`Document ${input.documentId} could not restart from validated.`);
+    document = restarted;
+  }
   if (!resumableDocumentStatuses.has(document.status)) {
     throw new Error(`Document ${input.documentId} is '${document.status}' and is not retryable.`);
   }
   const source = document.source as IngestSource;
   const docType = input.forceType ?? documentType(document.docType);
   const classificationOverride = Boolean(input.forceType);
-  if (document.url) return ingestDocument({ db, source, url: document.url, title: document.title ?? undefined, docType, classificationOverride });
+  // Retrying an existing audit row should not depend on a source URL remaining
+  // live. The hash-addressed PDF is the canonical retry input once stored.
   if (document.storagePath) {
     const fileBuffer = await downloadDocumentPdf(document.storagePath);
     return ingestDocument({ db, source, fileBuffer, fileName: document.title ?? undefined, docType, classificationOverride });
   }
+  if (document.url) return ingestDocument({ db, source, url: document.url, title: document.title ?? undefined, docType, classificationOverride });
   throw new Error(`Document ${input.documentId} has neither a source URL nor a stored PDF; retry it with --file <path>.`);
 }

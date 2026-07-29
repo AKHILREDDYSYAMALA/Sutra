@@ -49,9 +49,42 @@ export function relationTypeFor(edge: ResolverEdge, nodes: Map<string, ResolverN
   const source = nodes.get(edge.source);
   const target = nodes.get(edge.target);
   if (!source || !target) throw new Error(`Unknown edge endpoint ${edge.source} -> ${edge.target}.`);
-  if (source.named === false || target.named === false || target.type === "industry") return "unnamed_dependency" as const;
-  if (target.type === "customer" || target.type === "supplier" || target.type === "lender" || target.type === "subsidiary" || target.type === "parent" || target.type === "group_company") return target.type;
-  throw new Error(`Cannot map target node type ${JSON.stringify(target.type)} to a claim relation type.`);
+  if (source.named === false || target.named === false || source.type === "industry" || target.type === "industry") return "unnamed_dependency" as const;
+
+  const relationForNode = (node: ResolverNode) => {
+    if (node.type === "customer" || node.type === "supplier" || node.type === "lender" || node.type === "subsidiary" || node.type === "parent" || node.type === "group_company") return node.type;
+    return null;
+  };
+  const sourceIsTarget = source.type === "target";
+  const targetIsTarget = target.type === "target";
+
+  // Graph edges are allowed to point in either direction. When exactly one
+  // endpoint is the rated company, the relationship belongs to the other node
+  // (supplier → company is still a supplier claim, for example).
+  if (sourceIsTarget !== targetIsTarget) {
+    const counterpart = sourceIsTarget ? target : source;
+    const relationType = relationForNode(counterpart);
+    if (relationType) return relationType;
+    throw new Error(`Cannot map non-target node type ${JSON.stringify(counterpart.type)} to a claim relation type.`);
+  }
+
+  const relationType = relationForNode(target) ?? relationForNode(source);
+  if (relationType) return relationType;
+  throw new Error(
+    `Cannot map edge ${edge.source} (${JSON.stringify(source.type)}) -> ${edge.target} (${JSON.stringify(target.type)}) to a claim relation type.`,
+  );
+}
+
+/**
+ * A graph has one rated-company target. An edge between two distinct target nodes
+ * is therefore malformed model output, and cannot be represented by the ledger's
+ * deliberately finite relationship-type vocabulary. Callers record and omit it
+ * rather than coercing it into an inaccurate claim.
+ */
+export function isMalformedDualTargetEdge(edge: Pick<ResolverEdge, "source" | "target">, nodes: Map<string, ResolverNode>) {
+  const source = nodes.get(edge.source);
+  const target = nodes.get(edge.target);
+  return Boolean(source && target && source.id !== target.id && source.type === "target" && target.type === "target");
 }
 
 /**

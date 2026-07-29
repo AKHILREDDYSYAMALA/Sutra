@@ -67,11 +67,26 @@ Storage; duplicate hashes stop before re-extraction. Only `rating_rationale`
 documents proceed to extraction. Validation exclusions are stored in
 `documents.metadata.excluded` and never become claims.
 
+Quote validation remains strictly verbatim. For every rejected quote, ingestion
+records measurement-only diagnostics in `documents.metadata.rejected_quotes`:
+the model quote, claimed page, endpoint labels, closest same-length source-text
+window, lexical similarity, and one of `table_derived`, `cross_page`,
+`truncated`, `paraphrase`, or `not_found`. Inspect them with
+`npm run ingest:mismatches -- --id <documentId>`. These diagnostics never relax
+validation, create claims, or auto-approve anything.
+
+Malformed model edges with two distinct `target` endpoints are separately stored
+in `documents.metadata.malformed_relationships` and omitted from claims. The
+ledger has no generic relationship type, so this preserves the audit trail
+without mislabelling a prospective acquisition as a group-company claim.
+
 For downloaded batches, run `npm run ingest -- --dir <path/to/pdfs>`. Files run
 sequentially, duplicates are shown as skipped with their existing claim counts,
 and failures are reported without stopping later files. Add `--dry-run` to list
 the batch without changing the ledger. The final table reports each file,
-company, document type, claim count, validation exclusions, and status.
+company, document type, claim count, validation exclusions, and status. A
+rating rationale with fewer than three retained claims is visibly marked
+`review: unusually thin` for manual triage.
 
 New claims are `machine_validated` and a document stops at
 `ready_for_review`. `/review` is the human queue; it is the only Day 5 path that
@@ -86,6 +101,11 @@ and `failed` documents resume their existing audit row instead. Use
 `npm run ingest:status` to list all non-published/non-excluded documents, and
 `npm run ingest:abandon -- --id <documentId>` to record a failed abandonment;
 none of these commands delete rows.
+
+An explicit retry can also restart a `validated` document only when it has no
+claims yet. This covers deterministic post-validation failures such as a strict
+report-date parse or relation mapping failure; the retry records the restart in
+metadata and replays the PDF from discovery rather than duplicating evidence.
 
 If a classifier fix changes an `excluded` decision, run
 `npm run ingest:reclassify -- --id <documentId>`. It resets only that row to
