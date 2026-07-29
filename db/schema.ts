@@ -463,6 +463,44 @@ export const companyRequests = pgTable("company_requests", {
   fulfilledAt: timestamp("fulfilled_at", { withTimezone: true }),
 });
 
+/** One durable watermark and circuit-breaker state row for each acquisition source. */
+export const watcherState = pgTable("watcher_state", {
+  source: text("source").primaryKey(),
+  lastPolledAt: timestamp("last_polled_at", { withTimezone: true }),
+  lastAnnouncementDate: timestamp("last_announcement_date", { withTimezone: true }),
+  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  lastError: text("last_error"),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * The exchange-announcement audit trail exists before a PDF is fetched, so its
+ * unique external id—not a PDF hash—is the discovery idempotency boundary.
+ */
+export const discoveredAnnouncements = pgTable(
+  "discovered_announcements",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    source: text("source").notNull(),
+    externalId: text("external_id").notNull(),
+    scripCode: text("scrip_code").notNull(),
+    companyId: uuid("company_id").references(() => companies.id),
+    headline: text("headline").notNull(),
+    category: text("category"),
+    announcementDate: timestamp("announcement_date", { withTimezone: true }).notNull(),
+    attachmentUrl: text("attachment_url"),
+    rawPayload: jsonb("raw_payload").notNull(),
+    documentId: uuid("document_id").references(() => documents.id),
+    status: text("status").notNull().default("new"),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    uniqueIndex("discovered_announcements_source_external_id_unique").on(table.source, table.externalId),
+    index("discovered_announcements_company_date_idx").on(table.companyId, table.announcementDate),
+    check("discovered_announcements_status_check", sql`${table.status} in ('new', 'linked', 'ignored', 'failed')`),
+  ],
+);
+
 export const events = pgTable("events", {
   id: uuid("id").defaultRandom().primaryKey(),
   headline: text("headline").notNull(),

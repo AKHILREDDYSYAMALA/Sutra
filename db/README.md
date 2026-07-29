@@ -38,6 +38,15 @@ The normal document path is:
 
 `discovered → fetched → classified → extracted → validated → resolved → ready_for_review → published`
 
+## Acquisition watcher boundary
+
+`watcher_state` stores the BSE delta watermark and circuit-breaker state.
+`discovered_announcements` is the append-only-ish exchange audit trail keyed by
+`(source, external_id)` before a PDF hash exists. The watcher may create only a
+`documents.status='discovered'` row and link it from the announcement; it never
+downloads, classifies, extracts, validates, or publishes. The local worker owns
+those later transitions through the existing ingestion pipeline.
+
 `failed`, `excluded`, and `superseded_document` are terminal branches. Retryable
 worker errors do not change the stage; they retain it, record `last_error`, and
 schedule `next_attempt_at` using exponential backoff. `claimNextDocument` locks

@@ -34,6 +34,8 @@ export type IngestDocumentInput = {
   classificationOverride?: boolean;
   companyHint?: string;
   isPrivate?: boolean;
+  /** Processes an acquisition-created document row instead of making a new one. */
+  existingDocumentId?: string;
   /** Dependency injection for CLI and tests; runtime callers use DATABASE_URL. */
   db?: DatabaseClient;
   /** Test/worker seam; production uses the shared extraction and Storage functions. */
@@ -247,6 +249,44 @@ async function createOrResumeDocument(
   return { duplicate: false as const, document: created, resumedFrom: undefined };
 }
 
+async function useExistingDocument(
+  db: DatabaseClient,
+  documentId: string,
+  sha256: string,
+) {
+  const [existing] = await db.select().from(documents).where(eq(documents.id, documentId)).limit(1);
+  if (!existing) throw new Error(`Document ${documentId} was not found.`);
+  if (!resumableDocumentStatuses.has(existing.status)) {
+    return { duplicate: true as const, document: existing, resumedFrom: undefined };
+  }
+
+  // Discovery must reserve a non-null, announcement-derived hash before the PDF
+  // exists. Replace that provisional value with the content hash only once the
+  // worker fetches the PDF; a real hash collision is handled as an idempotent
+  // duplicate rather than creating a second durable document.
+  const [samePdf] = await db
+    .select()
+    .from(documents)
+    .where(eq(documents.sha256, sha256))
+    .limit(1);
+  if (samePdf && samePdf.id !== existing.id) {
+    await db.update(documents).set({
+      status: "superseded_document",
+      lastError: `Duplicate PDF content; canonical document is ${samePdf.id}.`,
+      nextAttemptAt: null,
+      updatedAt: sql`now()`,
+    }).where(eq(documents.id, existing.id));
+    return { duplicate: true as const, document: samePdf, resumedFrom: undefined };
+  }
+  const [updated] = await db
+    .update(documents)
+    .set({ sha256, updatedAt: sql`now()` })
+    .where(eq(documents.id, existing.id))
+    .returning();
+  if (!updated) throw new Error(`Document ${documentId} could not be prepared for ingestion.`);
+  return { duplicate: false as const, document: updated, resumedFrom: undefined };
+}
+
 /**
  * Persistent ingestion entrypoint. Each successful stage transition is written to
  * the ledger; terminal documents are never automatically published.
@@ -258,7 +298,9 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
   const extractGraph = input.services?.extract ?? extract;
   const sourcePdf = await loadPdf(input);
   const sha256 = createHash("sha256").update(sourcePdf.bytes).digest("hex");
-  const prepared = await createOrResumeDocument(db, input, sourcePdf, sha256);
+  const prepared = input.existingDocumentId
+    ? await useExistingDocument(db, input.existingDocumentId, sha256)
+    : await createOrResumeDocument(db, input, sourcePdf, sha256);
   if (prepared.duplicate) {
     const existingCounts = await storedDocumentCounts(db, prepared.document);
     return {

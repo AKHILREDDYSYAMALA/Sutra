@@ -17,6 +17,8 @@ const tables = [
   "alerts",
   "user_reads",
   "company_requests",
+  "watcher_state",
+  "discovered_announcements",
   "events",
   "event_entities",
 ] as const;
