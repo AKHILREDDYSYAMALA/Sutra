@@ -9,3 +9,7 @@ node_modules/
 
 # Timestamped database exports are local recovery artifacts, never source data.
 backups/
+
+# Local extraction evaluation history includes model outputs and is intentionally
+# reproducible locally, but never committed as product data.
+evals/

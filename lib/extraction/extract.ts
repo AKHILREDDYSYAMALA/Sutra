@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 
 import { extractionConfig } from "@/lib/extraction-config";
-import { getExtractionSystemPrompt } from "@/lib/extraction-prompt";
+import { defaultExtractionPromptVersion, getExtractionSystemPrompt } from "@/lib/extraction-prompt";
 import { extractionResponseFormat } from "@/lib/extraction-schema";
 import { capGroupStructureRelationships, needsCounterpartyCoverageSweep, relationshipCoverage, type RelationshipCoverage } from "@/lib/extraction/relationship-coverage";
 import { ensureGraphIntegrity } from "@/lib/graph-integrity";
@@ -20,7 +20,7 @@ import {
 const TEXT_MINIMUM = 200;
 const relationshipPageKeywords = /customer|supplier|vendor|procurement|import|raw material|concentration|counterparty/i;
 
-export const extractionPromptVersion = "rating_rationale_v4";
+export const extractionPromptVersion = defaultExtractionPromptVersion;
 
 type PdfPageData = {
   getTextContent: () => Promise<{ items: Array<{ str?: string }> }>;
@@ -78,6 +78,12 @@ export type ExtractedDocument = {
   usage?: ExtractionUsage;
   /** Per-relation response coverage, including the group-structure cap audit. */
   coverage?: RelationshipCoverage;
+};
+
+/** Used by the read-only evaluator to reproduce a particular checked-in prompt. */
+export type ExtractionRunOptions = {
+  promptVersion?: string;
+  systemPrompt?: string;
 };
 
 function labelledPages(pages: string[]) {
@@ -265,6 +271,7 @@ export async function extractPdfText(fileBuffer: Buffer): Promise<ExtractedPdfTe
 export async function extract(
   fileBuffer: Buffer,
   suppliedText?: ExtractedPdfText,
+  options: ExtractionRunOptions = {},
 ): Promise<ExtractedDocument> {
   const apiKey = process.env.OPENAI_API_KEY?.trim();
   if (!apiKey || apiKey === "YOUR_OPENAI_API_KEY") {
@@ -289,6 +296,8 @@ export async function extract(
   }
 
   const client = new OpenAI({ apiKey, maxRetries: 0 });
+  const systemPrompt = options.systemPrompt ?? getExtractionSystemPrompt();
+  const promptVersion = options.promptVersion ?? extractionPromptVersion;
   const extractionStartedAt = Date.now();
   const abortController = new AbortController();
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -301,7 +310,7 @@ export async function extract(
         max_tokens: extractionConfig.maxTokens,
         response_format: extractionResponseFormat,
         messages: [
-          { role: "system", content: getExtractionSystemPrompt() },
+          { role: "system", content: systemPrompt },
           {
             role: "user",
             content: `Extract the relationship graph from this rating report. The full report is used for quote verification; analyse only the report text below.\n\n${text.textForModel}`,
@@ -333,7 +342,7 @@ export async function extract(
             max_tokens: extractionConfig.maxTokens,
             response_format: extractionResponseFormat,
             messages: [
-              { role: "system", content: getExtractionSystemPrompt() },
+              { role: "system", content: systemPrompt },
               {
                 role: "user",
                 content: `Run a counterparty coverage sweep over this rating report. Return ONLY explicitly evidenced customer, supplier, lender, parent, and unnamed_dependency relationships. Do not return subsidiary or group_company edges in this sweep; those were handled separately. Continue through the entire report and prioritise named counterparties. Still populate relationship_summary as required by the schema.\n\n${text.textForModel}`,
@@ -387,7 +396,7 @@ export async function extract(
       graph: integrity.graph,
       meta: { excluded },
       modelVersion: extractionConfig.model,
-      promptVersion: extractionPromptVersion,
+      promptVersion,
       text,
       rejectedQuotes,
       usage,

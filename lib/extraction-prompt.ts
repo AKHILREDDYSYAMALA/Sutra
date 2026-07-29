@@ -1,4 +1,4 @@
-const defaultPrompt = `You are a financial analyst extracting dependency and counterparty relationships from Indian credit rating rationale reports (CRISIL, ICRA, CARE, India Ratings).
+const ratingRationaleV4 = `You are a financial analyst extracting dependency and counterparty relationships from Indian credit rating rationale reports (CRISIL, ICRA, CARE, India Ratings).
 
 From the report text provided, extract ONLY relationships that are explicitly stated. Never infer or guess. Do not create a named company or counterparty unless it is named in the text. An explicitly stated but unnamed dependency is permitted only through the named:false pattern defined below.
 
@@ -53,6 +53,24 @@ Rules:
 - If the document is not a credit rating report, return: {"result": {"error": "not_a_rating_report"}}.
 - source_page must match the [[PAGE n]] marker containing the quote, otherwise use null.`;
 
+export const defaultExtractionPromptVersion = "rating_rationale_v4";
+
+/**
+ * Prompt text is versioned in source so an eval run can reproduce exactly what
+ * it sent. Add a new immutable entry for every candidate prompt change.
+ */
+export const extractionPrompts = {
+  rating_rationale_v4: ratingRationaleV4,
+} as const;
+
+export type ExtractionPromptVersion = keyof typeof extractionPrompts;
+
+export function extractionPromptForVersion(version: string) {
+  const prompt = extractionPrompts[version as ExtractionPromptVersion];
+  if (!prompt) throw new Error(`Unknown extraction prompt version '${version}'. Add it to lib/extraction-prompt.ts before evaluating it.`);
+  return prompt;
+}
+
 export function getExtractionSystemPrompt() {
-  return process.env.SUTRA_EXTRACTION_SYSTEM_PROMPT?.trim() || defaultPrompt;
+  return process.env.SUTRA_EXTRACTION_SYSTEM_PROMPT?.trim() || extractionPromptForVersion(defaultExtractionPromptVersion);
 }
