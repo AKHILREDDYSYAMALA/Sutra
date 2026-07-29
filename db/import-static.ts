@@ -10,6 +10,7 @@ import {
 import { requiredDirectUrl } from "./env";
 import { createDatabaseClient } from "../lib/db/client";
 import { relationTypeFor, resolveGraphEntities } from "../lib/ingestion/resolve-entities";
+import { quoteHashFor } from "../lib/ingestion/claim-reconciliation";
 import { seedKnownEntityMergeRejections } from "./known-entity-rejections";
 
 const PUBLISHED_TRANSITIONS = [
@@ -131,6 +132,7 @@ async function importFile(
         exposurePct: edge.exposure_pct === null ? null : String(edge.exposure_pct),
         riskFlag: edge.risk_flag,
         quote: edge.source_quote,
+        quoteHash: quoteHashFor(edge.source_quote),
         page: edge.source_page,
         observedDate: publishedDate,
         lifecycleState: "current",

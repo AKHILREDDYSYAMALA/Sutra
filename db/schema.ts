@@ -257,6 +257,9 @@ export const claims = pgTable(
     exposurePct: numeric("exposure_pct", { precision: 5, scale: 2 }),
     riskFlag: text("risk_flag"),
     quote: text("quote").notNull(),
+    // Hash of normaliseForQuoteMatch(quote). The raw quote remains the evidence;
+    // this bounded key makes reprocessing idempotent without indexing long text.
+    quoteHash: text("quote_hash").notNull(),
     page: integer("page"),
     observedDate: date("observed_date").notNull(),
     lifecycleState: text("lifecycle_state").notNull().default("current"),
@@ -287,6 +290,14 @@ export const claims = pgTable(
     index("claims_target_entity_id_idx").on(table.targetEntityId),
     index("claims_source_entity_id_idx").on(table.sourceEntityId),
     index("claims_verification_tier_idx").on(table.verificationTier),
+    index("claims_quote_hash_idx").on(table.quoteHash),
+    uniqueIndex("claims_document_relation_quote_hash_unique").on(
+      table.documentId,
+      table.sourceEntityId,
+      table.targetEntityId,
+      table.relationType,
+      table.quoteHash,
+    ),
     check(
       "claims_relation_type_check",
       sql`${table.relationType} in ('customer', 'supplier', 'lender', 'subsidiary', 'parent', 'group_company', 'unnamed_dependency')`,
@@ -319,6 +330,10 @@ export const claims = pgTable(
     check(
       "claims_exclusion_reason_check",
       sql`${table.verificationTier} <> 'excluded' or ${table.exclusionReason} is not null`,
+    ),
+    check(
+      "claims_excluded_requires_human_review_check",
+      sql`${table.verificationTier} <> 'excluded' or (${table.reviewedBy} is not null and ${table.reviewedAt} is not null and ${table.reviewState} = 'decided')`,
     ),
     check(
       "claims_extraction_confidence_check",

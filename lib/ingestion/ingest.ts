@@ -11,6 +11,7 @@ import { extract, extractPdfText, type ExtractedDocument, type ExtractedPdfText 
 import { normalizeEntityName } from "@/lib/entity-normalization";
 
 import { classifyDocument, collectClassificationSignals, type DocumentClassification, type DocumentType } from "./classify";
+import { reconcileClaimInserts } from "./claim-reconciliation";
 import { mergeRejectedQuoteDiagnostics, type RejectedQuoteDiagnostic } from "./quote-mismatches";
 import { isMalformedDualTargetEdge, resolveGraphEntities, relationTypeFor } from "./resolve-entities";
 import { downloadDocumentPdf, uploadDocumentPdf } from "./storage";
@@ -377,7 +378,9 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
       updatedAt: sql`now()`,
     }).where(eq(documents.id, document.id));
 
-    const claimCount = await db.transaction(async (tx) => {
+    const reconciliation = await db.transaction(async (tx) => {
+      const [lockedDocument] = await tx.select({ id: documents.id }).from(documents).where(eq(documents.id, document.id)).for("update");
+      if (!lockedDocument) throw new Error(`Document ${document.id} disappeared during claim reconciliation.`);
       const claimNodeIds = new Set(claimEdges.flatMap((edge) => [edge.source, edge.target]));
       const entityByNodeId = await resolveGraphEntities(tx, {
         documentId: document.id,
@@ -408,13 +411,12 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
           promptVersion: extracted.promptVersion,
         };
       });
-      if (rows.length > 0) await tx.insert(claims).values(rows);
-      return rows.length;
+      return reconcileClaimInserts(tx, { documentId: document.id, candidates: rows });
     });
     await seedKnownEntityMergeRejections(db);
     await advanceDocumentStatus(db, document.id, "resolved");
     await advanceDocumentStatus(db, document.id, "ready_for_review");
-    return { outcome: "ready_for_review", documentId: document.id, sha256, status: "ready_for_review", claimCount, excludedCount: extracted.meta.excluded.length, company: company.name, docType: classification.docType, resumedFrom: prepared.resumedFrom };
+    return { outcome: "ready_for_review", documentId: document.id, sha256, status: "ready_for_review", claimCount: reconciliation.counts.new_claims, excludedCount: extracted.meta.excluded.length, company: company.name, docType: classification.docType, resumedFrom: prepared.resumedFrom };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Sutra document ingestion failed", { documentId: document.id, sha256, message });

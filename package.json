@@ -30,6 +30,7 @@
     "ingest:status": "tsx db/ingest-status.ts",
     "ingest:abandon": "tsx db/ingest-abandon.ts",
     "ingest:reclassify": "tsx db/ingest-reclassify.ts",
+    "ingest:reprocess": "tsx db/ingest-reprocess.ts",
     "ingest:mismatches": "tsx db/ingest-mismatches.ts",
     "test:ingestion": "tsx --test lib/ingestion/*.test.ts",
     "verify:parity": "tsx scripts/verify-ui-parity.mjs",

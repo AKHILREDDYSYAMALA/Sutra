@@ -57,6 +57,13 @@
       "when": 1785436800000,
       "tag": "0007_review_volume_safety",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785523200000,
+      "tag": "0008_wonderful_garia",
+      "breakpoints": true
     }
   ]
 }

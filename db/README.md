@@ -107,6 +107,34 @@ claims yet. This covers deterministic post-validation failures such as a strict
 report-date parse or relation mapping failure; the retry records the restart in
 metadata and replays the PDF from discovery rather than duplicating evidence.
 
+### Reprocessing after a validation improvement
+
+Use `npm run ingest:reprocess -- --id <documentId> --trigger <reason>` for an
+already `ready_for_review` rating rationale. It reads the immutable stored PDF
+and records a new extraction pass without changing any prior claim.
+
+Reconciliation first compares the relationship key
+`(document_id, source_entity_id, target_entity_id, relation_type)`. Every claim
+also stores `quote_hash`, the SHA-256 of the normalised evidence quote. An exact
+relationship-and-hash match is skipped; a relationship with a changed hash is
+recorded as `documents.metadata.reprocess[].quote_variants` for a human rather
+than inserted. Only a previously absent relationship becomes a new
+`machine_validated` claim. The composite unique index includes the hash instead
+of raw quote text, so long table quotes remain safe to index.
+
+Validation-dropped edges still live only in document metadata, never in
+`claims`. Every persisted `excluded` claim requires a final reviewer record, so
+it represents a human decision and remains final during reconciliation.
+`documents.metadata.reprocess[]` appends the timestamp, trigger, model and
+prompt versions, reconciliation counts, quote variants, and IDs of newly added
+claims for every successful run.
+
+Published documents are intentionally rejected by this command until the
+review-batch UI ships: that UI will keep the document `published`, expose only
+the new claim IDs from its reprocess entry for review, and leave earlier public
+claims untouched. This avoids exposing new `machine_validated` claims publicly
+or moving a published document backward through the state machine.
+
 If a classifier fix changes an `excluded` decision, run
 `npm run ingest:reclassify -- --id <documentId>`. It resets only that row to
 `discovered` and re-runs the normal pipeline. `--force-type rating_rationale`
