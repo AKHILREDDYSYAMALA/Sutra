@@ -1,7 +1,11 @@
 # BSE corporate-announcements client
 
 This is a deliberately thin client for BSE's **unofficial** endpoint. It is
-used only to discover a linked PDF; it never treats an announcement as a claim.
+currently **disabled**: BSE consistently returned HTTP 406 to a plainly
+identified non-browser request. Sutra will not add browser-like headers,
+cookies, or another access-control workaround. The code remains for its typed
+parser, fixtures, and as a source-adapter reference; it never treats an
+announcement as a claim.
 
 ## Observed contract (29 July 2026)
 
@@ -23,11 +27,11 @@ Required query parameters for equity announcements:
 | `strscrip` | BSE scrip code |
 | `strType` | `C` for equity corporate announcements |
 
-The client identifies itself as Sutra and sends normal `Accept`, `Origin` and
-`Referer` headers. It does not impersonate a browser or circumvent access
-controls. During this inspection the page returned announcements normally, but
-the JSON host returned HTTP 406 to a non-browser request; that response is
-treated as a retryable acquisition failure and surfaces in `watcher_state`.
+The client identifies itself as Sutra and sends only an honest API `Accept`
+header. It does not impersonate a browser or circumvent access controls. During
+the inspection the page returned announcements normally, but the JSON host
+returned HTTP 406 to the non-browser request. `watch:bse` therefore returns
+`skipped: "disabled"` without making BSE requests.
 
 Responses have `Table` (announcement rows) and `Table1[0].ROWCNT` (total rows).
 

@@ -83,7 +83,11 @@ function delay(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
-/** Conservative, stateful client for BSE's undocumented website endpoint. */
+/**
+ * Retained for its typed parser and fixtures only. The watcher is disabled because
+ * BSE returns HTTP 406 to this honest, identified non-browser client. Do not add
+ * browser-looking headers, cookies, or other access-control workarounds here.
+ */
 export class BseClient {
   private lastRequestAt = 0;
   private readonly request: typeof fetch;
@@ -132,10 +136,7 @@ export class BseClient {
         const response = await this.request(url, {
           headers: {
             "user-agent": this.userAgent,
-            accept: "application/json, text/plain, */*",
-            "accept-language": "en-US,en;q=0.5",
-            origin: BSE_SITE,
-            referer: `${BSE_SITE}/corporates/ann.html`,
+            accept: "application/json",
           },
         });
         if (!response.ok) throw new Error(`BSE announcements HTTP ${response.status}.`);

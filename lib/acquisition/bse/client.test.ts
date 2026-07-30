@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import fixtures from "./fixtures/announcements.json";
-import { parseAnnouncement } from "./client";
+import { BseClient, parseAnnouncement } from "./client";
 import { bseCompanyNameMatches, isRatingAnnouncement } from "./watcher";
 
 test("parseAnnouncement maps saved BSE announcement payloads", () => {
@@ -25,4 +25,29 @@ test("BSE scrip guard accepts normalised names but rejects a different company",
   assert.equal(bseCompanyNameMatches("Syrma SGS Technology Limited", "SYRMA SG S TECHNOLOGY LIMITED"), true);
   assert.equal(bseCompanyNameMatches("PTC Industries Limited", "PTC INDUSTRIES LIMITED"), true);
   assert.equal(bseCompanyNameMatches("Sona BLW Precision Forgings Limited", "Tata Motors Limited"), false);
+});
+
+test("BSE client never uses browser-impersonation headers", async () => {
+  let requestHeaders: Headers | undefined;
+  const client = new BseClient({
+    minRequestIntervalMs: 0,
+    fetch: async (_input, init) => {
+      requestHeaders = new Headers(init?.headers);
+      return new Response(JSON.stringify({ Table: [], Table1: [{ ROWCNT: 0 }] }), {
+        headers: { "content-type": "application/json" },
+      });
+    },
+  });
+
+  await client.announcements({
+    scripCode: "532500",
+    from: new Date("2026-07-29T00:00:00Z"),
+    to: new Date("2026-07-30T00:00:00Z"),
+  });
+
+  assert.equal(requestHeaders?.get("user-agent"), "Sutra BSE watcher/1.0 (+https://github.com/AKHILREDDYSYAMALA/Sutra)");
+  assert.equal(requestHeaders?.get("accept"), "application/json");
+  assert.equal(requestHeaders?.get("origin"), null);
+  assert.equal(requestHeaders?.get("referer"), null);
+  assert.equal(requestHeaders?.get("accept-language"), null);
 });

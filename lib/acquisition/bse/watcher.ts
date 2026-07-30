@@ -12,8 +12,13 @@ const MAX_CONSECUTIVE_FAILURES = 3;
 const initialLookbackMs = 24 * 60 * 60 * 1_000;
 const ratingLanguage = /\b(credit\s*rating|rating\s*action|rating\s*agency|crisil|icra|care\s*ratings?|india\s*ratings?|ind[- ]?ra|acuite|brickwork|infomerics)\b/i;
 
+// BSE's undocumented endpoint consistently returns HTTP 406 to an honest,
+// identifiable non-browser client. This remains intentionally disabled rather
+// than being made to look like a browser or otherwise bypassing access controls.
+export const BSE_WATCH_DISABLED_REASON = "BSE's undocumented announcements endpoint returns HTTP 406 to honest non-browser requests; Sutra will not circumvent that access control.";
+
 export type BseWatchSummary = {
-  skipped?: "poll_interval" | "circuit_open" | "no_mapped_companies";
+  skipped?: "disabled" | "poll_interval" | "circuit_open" | "no_mapped_companies";
   polledCompanies: number;
   skippedCompanies: number;
   announcementsSeen: number;
@@ -84,6 +89,10 @@ export async function watchBse(input: { db: DatabaseClient; dryRun?: boolean; cl
   const client = input.client ?? new BseClient();
   const [state] = await db.select().from(watcherState).where(eq(watcherState.source, "bse")).limit(1);
   const summary: BseWatchSummary = { polledCompanies: 0, skippedCompanies: 0, announcementsSeen: 0, relevant: 0, linked: 0, ignored: 0, failures: 0, dryRun };
+  if (BSE_WATCH_DISABLED_REASON) {
+    console.warn(JSON.stringify({ source: "bse", event: "watcher_disabled", reason: BSE_WATCH_DISABLED_REASON }));
+    return { ...summary, skipped: "disabled" };
+  }
   if (state && now.getTime() - (state.lastPolledAt?.getTime() ?? 0) < BSE_MIN_POLL_INTERVAL_MS) return { ...summary, skipped: "poll_interval" };
   if ((state?.consecutiveFailures ?? 0) >= MAX_CONSECUTIVE_FAILURES) return { ...summary, skipped: "circuit_open" };
 
