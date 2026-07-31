@@ -470,6 +470,7 @@ export const watcherState = pgTable("watcher_state", {
   lastAnnouncementDate: timestamp("last_announcement_date", { withTimezone: true }),
   consecutiveFailures: integer("consecutive_failures").notNull().default(0),
   lastError: text("last_error"),
+  disabledUntil: timestamp("disabled_until", { withTimezone: true }),
   updatedAt: updatedAt(),
 });
 

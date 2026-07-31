@@ -40,7 +40,9 @@ The normal document path is:
 
 ## Acquisition watcher boundary
 
-`watcher_state` stores the BSE delta watermark and circuit-breaker state.
+`watcher_state` stores the BSE delta watermark, circuit-breaker state, and an
+explicit `disabled_until` timestamp. A BSE 403 or 429 disables polling for at
+least 24 hours; it is a hard stop, never a signal to retry through a block.
 `discovered_announcements` is the append-only-ish exchange audit trail keyed by
 `(source, external_id)` before a PDF hash exists. The watcher may create only a
 `documents.status='discovered'` row and link it from the announcement; it never

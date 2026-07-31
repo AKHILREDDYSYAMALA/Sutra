@@ -1,0 +1,1 @@
+ALTER TABLE "watcher_state" ADD COLUMN "disabled_until" timestamp with time zone;

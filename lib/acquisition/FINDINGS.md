@@ -3,6 +3,21 @@
 Audit date: 30 July 2026. This is an investigation record, not an
 authorisation to acquire from any source. No new source adapter was built.
 
+## Recorded interim BSE decision (31 July 2026)
+
+Sutra will access BSE's public corporate-announcements endpoint at low volume
+for a curated watchlist while pre-revenue. These are SEBI-mandated public
+disclosures, and BSE's audit found no explicit anti-scraping term. The decision
+is intentionally limited: the stated upgrade path is **BSE Corporate Data —
+Announcements, EOD (₹5L/yr)** once Sutra has revenue.
+
+The BSE client may establish the public announcement-page session and then use
+browser-equivalent XHR headers at the enforced rate limits. It must stop on a
+403 or 429; it must never use proxy rotation, IP cycling, CAPTCHA handling, or
+any other way around a block. This exception applies **only** to BSE. NSE, ICRA,
+and CRISIL remain disabled because their published terms contain explicit
+prohibitions; that distinction is the line Sutra holds.
+
 ## Method
 
 Each probe was a single `GET` from a plain command-line client, with no cookies,
@@ -118,17 +133,23 @@ The NSE and BSE JSON endpoints are website-internal/undocumented rather than
 published acquisition interfaces and are not candidates for workaround-based
 integration.
 
-## BSE status
+## BSE status — approved interim source
 
-The BSE adapter is retained for its typed payload parser and fixtures but is now
-explicitly disabled. BSE returned HTTP 406 to an honest non-browser request.
-`watch:bse` exits with `skipped: "disabled"` and never sends the request. The
-client no longer sends `Origin`, `Referer`, or browser-language headers. Do not
-re-enable it by making the request resemble a browser.
+The BSE adapter remains a typed payload parser and source adapter. It now
+establishes the public announcements-page session, retains its cookies, and
+uses browser-equivalent XHR headers for the JSON call. The limits are enforced
+in code: at least three seconds between every BSE request, no more than one poll
+per 30 minutes, no more than 100 BSE requests per run, and at most three
+consecutive retryable failures. A 403 or 429 disables the source for at least
+24 hours and is visible in `watch:status`.
+
+`npm run watch:bse -- --single --scrip <code>` is a read-only debugging mode:
+it performs one session bootstrap and one API-page request, then prints the
+returned announcement summaries without writing discovery rows or documents.
 
 ## Conclusion
 
-There is no source that is both clearly usable and appropriate to automate under
-its current public technical and policy surface. No adapter was added. The next
-safe move is an access/permission conversation with CARE or India Ratings, not
-endpoint reverse engineering.
+BSE is the sole approved interim acquisition source under the recorded
+low-volume decision above. No new adapter was added for any other source. The
+next safe move for CARE or India Ratings remains an access/permission
+conversation, not endpoint reverse engineering.

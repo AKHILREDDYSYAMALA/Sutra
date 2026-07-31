@@ -1,11 +1,10 @@
 # BSE corporate-announcements client
 
 This is a deliberately thin client for BSE's **unofficial** endpoint. It is
-currently **disabled**: BSE consistently returned HTTP 406 to a plainly
-identified non-browser request. Sutra will not add browser-like headers,
-cookies, or another access-control workaround. The code remains for its typed
-parser, fixtures, and as a source-adapter reference; it never treats an
-announcement as a claim.
+enabled as a deliberate, low-volume interim source for a curated pre-revenue
+watchlist of SEBI-mandated public disclosures. It establishes the same public
+session flow as the BSE page before calling the public JSON endpoint; it never
+treats an announcement as a claim.
 
 ## Observed contract (29 July 2026)
 
@@ -27,11 +26,11 @@ Required query parameters for equity announcements:
 | `strscrip` | BSE scrip code |
 | `strType` | `C` for equity corporate announcements |
 
-The client identifies itself as Sutra and sends only an honest API `Accept`
-header. It does not impersonate a browser or circumvent access controls. During
-the inspection the page returned announcements normally, but the JSON host
-returned HTTP 406 to the non-browser request. `watch:bse` therefore returns
-`skipped: "disabled"` without making BSE requests.
+The page first creates the ordinary BSE web session and retains its cookies for
+the XHR. The JSON request has browser-equivalent `User-Agent`, `Accept`,
+`Accept-Language`, `Origin`, `Referer`, and `Sec-Fetch-*` headers. This is a
+specific interim decision documented in `../FINDINGS.md`, not a precedent for
+the sources that expressly prohibit automation.
 
 Responses have `Table` (announcement rows) and `Table1[0].ROWCNT` (total rows).
 
@@ -46,8 +45,14 @@ is the only code that understands those payload names. Attachment names are
 turned into `https://www.bseindia.com/xml-data/corpfiling/AttachLive/...` URLs.
 
 Paginate only while a full page is returned. The watcher requests one mapped
-scrip at a time, waits at least three seconds between API requests, retries an
-HTTP/network failure with exponential backoff three times, and refuses source
-poll cycles closer than 15 minutes. Three consecutive failed cycles open the
-source circuit breaker; inspect `npm run watch:status` before resetting that
-state deliberately in the database.
+scrip at a time, waits at least three seconds between **all** BSE requests
+(including session setup), limits a run to 100 requests, retries a non-200 or
+network failure with exponential backoff no more than three times, and refuses
+source poll cycles closer than 30 minutes. Three consecutive request failures
+hard-stop the current run; three failed cycles open the source circuit breaker.
+
+A 403 or 429 stops immediately: there is no retry, proxy rotation, IP cycling,
+or CAPTCHA handling. `watcher_state.disabled_until` is set at least 24 hours
+ahead and `npm run watch:status` reports it. `npm run watch:bse -- --single
+--scrip <code>` performs one session bootstrap and one API-page request without
+touching the ledger, for bounded debugging.

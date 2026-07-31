@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import fixtures from "./fixtures/announcements.json";
-import { BseClient, parseAnnouncement } from "./client";
+import { BseBlockedError, BseClient, parseAnnouncement } from "./client";
 import { bseCompanyNameMatches, isRatingAnnouncement } from "./watcher";
 
 test("parseAnnouncement maps saved BSE announcement payloads", () => {
@@ -27,12 +27,15 @@ test("BSE scrip guard accepts normalised names but rejects a different company",
   assert.equal(bseCompanyNameMatches("Sona BLW Precision Forgings Limited", "Tata Motors Limited"), false);
 });
 
-test("BSE client never uses browser-impersonation headers", async () => {
-  let requestHeaders: Headers | undefined;
+test("BSE client establishes a session and carries its browser-equivalent XHR headers", async () => {
+  const requestHeaders: Headers[] = [];
   const client = new BseClient({
     minRequestIntervalMs: 0,
     fetch: async (_input, init) => {
-      requestHeaders = new Headers(init?.headers);
+      requestHeaders.push(new Headers(init?.headers));
+      if (requestHeaders.length === 1) {
+        return new Response("", { headers: { "set-cookie": "bse_session=abc123; Path=/; HttpOnly" } });
+      }
       return new Response(JSON.stringify({ Table: [], Table1: [{ ROWCNT: 0 }] }), {
         headers: { "content-type": "application/json" },
       });
@@ -45,9 +48,32 @@ test("BSE client never uses browser-impersonation headers", async () => {
     to: new Date("2026-07-30T00:00:00Z"),
   });
 
-  assert.equal(requestHeaders?.get("user-agent"), "Sutra BSE watcher/1.0 (+https://github.com/AKHILREDDYSYAMALA/Sutra)");
-  assert.equal(requestHeaders?.get("accept"), "application/json");
-  assert.equal(requestHeaders?.get("origin"), null);
-  assert.equal(requestHeaders?.get("referer"), null);
-  assert.equal(requestHeaders?.get("accept-language"), null);
+  const [sessionHeaders, xhrHeaders] = requestHeaders;
+  assert.equal(requestHeaders.length, 2);
+  assert.match(sessionHeaders?.get("user-agent") ?? "", /^Mozilla\/5\.0/);
+  assert.match(sessionHeaders?.get("accept") ?? "", /^text\/html/);
+  assert.equal(sessionHeaders?.get("sec-fetch-dest"), "document");
+  assert.equal(xhrHeaders?.get("accept"), "application/json");
+  assert.equal(xhrHeaders?.get("accept-language"), "en-US,en;q=0.9");
+  assert.equal(xhrHeaders?.get("origin"), "https://www.bseindia.com");
+  assert.equal(xhrHeaders?.get("referer"), "https://www.bseindia.com/corporates/ann.html");
+  assert.equal(xhrHeaders?.get("sec-fetch-mode"), "cors");
+  assert.equal(xhrHeaders?.get("sec-fetch-site"), "same-site");
+  assert.equal(xhrHeaders?.get("cookie"), "bse_session=abc123");
+});
+
+test("BSE stops immediately instead of retrying a block response", async () => {
+  let calls = 0;
+  const client = new BseClient({
+    fetch: async () => {
+      calls += 1;
+      return new Response("blocked", { status: 403 });
+    },
+  });
+
+  await assert.rejects(
+    client.announcements({ scripCode: "532500", from: new Date("2026-07-29T00:00:00Z"), to: new Date("2026-07-30T00:00:00Z") }),
+    BseBlockedError,
+  );
+  assert.equal(calls, 1);
 });
