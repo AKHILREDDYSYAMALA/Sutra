@@ -1,9 +1,9 @@
 import { BSE_MAX_CONSECUTIVE_FAILURES, BseBlockedError, BseClient } from "../lib/acquisition/bse/client";
-import { disableBseWatcher, getBseWatcherState, watchBse } from "../lib/acquisition/bse/watcher";
+import { disableBseWatcher, getBseWatcherState, listBseIgnoredAnnouncements, watchBse } from "../lib/acquisition/bse/watcher";
 import { createDatabaseClient } from "../lib/db/client";
 import { requiredDirectUrl } from "./env";
 
-const validFlags = "--dry-run, --force, --since <YYYY-MM-DD>, --single, --scrip <code>";
+const validFlags = "--dry-run, --force, --since <YYYY-MM-DD>, --single, --scrip <code>, --show-ignored";
 
 type WatchCliOptions = {
   dryRun: boolean;
@@ -11,6 +11,7 @@ type WatchCliOptions = {
   since: Date | undefined;
   single: boolean;
   scripCode: string | undefined;
+  showIgnored: boolean;
 };
 
 function parseSince(value: string) {
@@ -21,7 +22,7 @@ function parseSince(value: string) {
 }
 
 function parseOptions(args: string[]): WatchCliOptions {
-  const options: WatchCliOptions = { dryRun: false, force: false, since: undefined, single: false, scripCode: undefined };
+  const options: WatchCliOptions = { dryRun: false, force: false, since: undefined, single: false, scripCode: undefined, showIgnored: false };
   const seen = new Set<string>();
   const requireValue = (flag: string, index: number) => {
     const value = args[index + 1];
@@ -44,6 +45,10 @@ function parseOptions(args: string[]): WatchCliOptions {
       case "--single":
         seen.add(argument);
         options.single = true;
+        break;
+      case "--show-ignored":
+        seen.add(argument);
+        options.showIgnored = true;
         break;
       case "--since":
         seen.add(argument);
@@ -112,13 +117,25 @@ async function main() {
   try {
     if (options.single) {
       await singleScripCheck({ db, code: options.scripCode!, since: options.since, dryRun: options.dryRun });
-      return;
+    } else {
+      console.log(JSON.stringify(
+        await watchBse({ db, dryRun: options.dryRun, force: options.force, since: options.since }),
+        null,
+        2,
+      ));
     }
-    console.log(JSON.stringify(
-      await watchBse({ db, dryRun: options.dryRun, force: options.force, since: options.since }),
-      null,
-      2,
-    ));
+    if (options.showIgnored) {
+      const ignored = await listBseIgnoredAnnouncements(db, { since: options.since });
+      console.table(ignored.map((announcement) => ({
+        id: announcement.externalId,
+        company: announcement.company ?? "—",
+        scrip_code: announcement.scripCode,
+        announcement_date: announcement.announcementDate.toISOString(),
+        category: announcement.category ?? "—",
+        headline: announcement.headline,
+        attachment_url: announcement.attachmentUrl ?? "—",
+      })));
+    }
   } finally { await client.end({ timeout: 5 }); }
 }
 main().catch((error) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; });

@@ -20,10 +20,17 @@ test("rating relevance is conservative and keeps non-rating announcements audita
   assert.equal(isRatingAnnouncement({ headline: "Issuance of duplicate share certificate", category: null, subCategory: null }), false);
 });
 
-test("BSE scrip guard accepts normalised names but rejects a different company", () => {
+test("BSE scrip guard accepts normalised names and legal-suffix group markers", () => {
   assert.equal(bseCompanyNameMatches("Sona BLW Precision Forgings Limited", "SONA BL W PRECISION FORGINGS LIMITED"), true);
   assert.equal(bseCompanyNameMatches("Syrma SGS Technology Limited", "SYRMA SG S TECHNOLOGY LIMITED"), true);
   assert.equal(bseCompanyNameMatches("PTC Industries Limited", "PTC INDUSTRIES LIMITED"), true);
+  assert.equal(bseCompanyNameMatches("Modison Limited", "Modison Ltd-$"), true);
+  assert.equal(bseCompanyNameMatches("Avanti Feeds Limited", "Avanti Feeds Ltd-$"), true);
+  assert.equal(bseCompanyNameMatches("Avanti Feeds Limited", "Avanti Feeds Ltd-*"), true);
+});
+
+test("BSE scrip guard remains strict on a genuinely different issuer", () => {
+  assert.equal(bseCompanyNameMatches("Tata Motors Limited", "Tata Motors Passenger Vehicles Ltd"), false);
   assert.equal(bseCompanyNameMatches("Sona BLW Precision Forgings Limited", "Tata Motors Limited"), false);
 });
 

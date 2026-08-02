@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { companies, watcherState } from "@/db/schema";
+import { companies, discoveredAnnouncements, watcherState } from "@/db/schema";
 import type { DatabaseClient } from "@/lib/db";
 
 import { BseClient } from "./client";
@@ -9,7 +9,8 @@ import { watchBse } from "./watcher";
 
 function watchDatabase(input: { state?: Record<string, unknown>; companies?: Array<Record<string, unknown>> } = {}) {
   let persistedState: Record<string, unknown> | undefined;
-  const companiesToWatch = input.companies ?? [{ id: "00000000-0000-0000-0000-000000000001", slug: "test-company", bseScripCode: "532500" }];
+  const recordedAnnouncements: Array<Record<string, unknown>> = [];
+  const companiesToWatch = input.companies ?? [{ id: "00000000-0000-0000-0000-000000000001", name: "Test Company Limited", slug: "test-company", bseScripCode: "532500" }];
   const stateRows = input.state ? [input.state] : [];
   const db = {
     select: () => ({
@@ -21,14 +22,22 @@ function watchDatabase(input: { state?: Record<string, unknown>; companies?: Arr
         };
       },
     }),
-    insert: () => ({
+    insert: (table: unknown) => ({
       values: (value: Record<string, unknown>) => {
+        if (table === discoveredAnnouncements) {
+          recordedAnnouncements.push(value);
+          return {
+            onConflictDoUpdate: () => ({
+              returning: async () => [{ id: `announcement-${recordedAnnouncements.length}`, status: value.status, documentId: null }],
+            }),
+          };
+        }
         persistedState = value;
         return { onConflictDoUpdate: async () => undefined };
       },
     }),
   };
-  return { db: db as unknown as DatabaseClient, persistedState: () => persistedState };
+  return { db: db as unknown as DatabaseClient, persistedState: () => persistedState, recordedAnnouncements };
 }
 
 test("a BSE 403 disables the source for at least 24 hours and stops the run", async () => {
@@ -85,4 +94,41 @@ test("--force bypasses an active poll interval but not an active source disable"
   assert.equal(summary.force, true);
   assert.equal(summary.skipped, "disabled_until");
   assert.equal(summary.polledCompanies, 0);
+});
+
+test("BSE reports repeated scrip-name mismatches once per company while retaining each announcement", async () => {
+  const { db, recordedAnnouncements } = watchDatabase();
+  const client = {
+    announcements: async () => [
+      {
+        bseAnnouncementId: "wrong-1", scripCode: "532500", companyName: "Different Company Limited", headline: "Update",
+        category: null, subCategory: null, announcementDate: new Date("2026-07-31T12:00:00.000Z"), attachmentUrl: null, rawPayload: {},
+      },
+      {
+        bseAnnouncementId: "wrong-2", scripCode: "532500", companyName: "Different Company Limited", headline: "Another update",
+        category: null, subCategory: null, announcementDate: new Date("2026-07-31T12:01:00.000Z"), attachmentUrl: null, rawPayload: {},
+      },
+    ],
+  } as unknown as BseClient;
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...values: unknown[]) => { errors.push(values.map(String).join(" ")); };
+  try {
+    const summary = await watchBse({ db, client, now: new Date("2026-07-31T13:00:00.000Z") });
+    assert.equal(summary.failures, 2);
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.equal(recordedAnnouncements.length, 2);
+  assert.equal(errors.length, 1);
+  assert.deepEqual(JSON.parse(errors[0]!), {
+    source: "bse",
+    event: "scrip_name_mismatch_summary",
+    company: "test-company",
+    mapped_name: "Test Company Limited",
+    scrip_code: "532500",
+    count: 2,
+    detail: "Individual mismatch details are recorded in discovered_announcements.",
+  });
 });

@@ -34,10 +34,13 @@ the sources that expressly prohibit automation.
 
 Responses have `Table` (announcement rows) and `Table1[0].ROWCNT` (total rows).
 
-Before an announcement can be linked to a document, the watcher normalizes its
-`SLONGNAME` and compares it with the manually mapped company name for that scrip
-code. A mismatch is recorded as `failed`, including both names and the scrip code,
-and no document is created or linked. This makes a mistyped scrip code visible
+Before an announcement can be linked to a document, the watcher removes BSE's
+trailing one-symbol listing marker (such as `Ltd-$` or `Ltd-*`) only when it
+follows a legal suffix, then normalizes its `SLONGNAME` and compares it with the
+manually mapped company name for that scrip code. A genuine mismatch is recorded
+as `failed`, including both names and the scrip code, and no document is created
+or linked. Mismatches are logged once per company with a count; the individual
+rows remain in `discovered_announcements`. This makes a mistyped scrip code visible
 without ever attaching another company's filing.
 Rows observed by the site use fields such as `NEWSID`, `SCRIP_CD`, `SLONGNAME`,
 `NEWSSUB`, `CATEGORYNAME`, `DissemDT` and `ATTACHMENTNAME`; `parseAnnouncement`
@@ -64,3 +67,7 @@ interval bypass; it queries from that date, reports per-company counts, and does
 not advance the normal `last_announcement_date` watermark or `last_polled_at`
 cadence. `--single` likewise bypasses the poll interval only, while still
 honouring an active block and recording a 403/429 disable in `watcher_state`.
+`--show-ignored` prints the already-audited BSE rows the relevance filter marked
+`ignored` (restricted to `--since` when supplied), including company, date,
+category, headline and attachment URL. It is a diagnostic only; it does not
+alter relevance decisions.

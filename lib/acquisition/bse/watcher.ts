@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 
 import { companies, discoveredAnnouncements, documents, watcherState } from "@/db/schema";
 import type { DatabaseClient } from "@/lib/db";
@@ -20,6 +20,8 @@ import {
 const initialLookbackMs = 24 * 60 * 60 * 1_000;
 const BSE_BLOCK_COOLDOWN_MS = 24 * 60 * 60 * 1_000;
 const ratingLanguage = /\b(credit\s*rating|rating\s*action|rating\s*agency|crisil|icra|care\s*ratings?|india\s*ratings?|ind[- ]?ra|acuite|brickwork|infomerics)\b/i;
+const bseLegalSuffix = /\b(?:limited|ltd|private|pvt|plc|inc|incorporated|corporation|corp|company|co|llp|llc|gmbh|sa|nv|bv|ag|pte)\.?\s*$/i;
+const bseTrailingGroupMarker = /\s*-\s*[^\p{L}\p{N}\s]\s*$/u;
 
 export type BseWatchSummary = {
   skipped?: "disabled_until" | "poll_interval" | "circuit_open" | "no_mapped_companies";
@@ -55,7 +57,20 @@ export function isRatingAnnouncement(announcement: Pick<Announcement, "headline"
 
 /** Guard against a mistyped manual scrip mapping attaching another company's filings. */
 export function bseCompanyNameMatches(mappedCompanyName: string, announcementCompanyName: string) {
-  return normalizeEntityName(mappedCompanyName) === normalizeEntityName(announcementCompanyName);
+  return normalizeEntityName(stripBseListingGroupMarker(mappedCompanyName))
+    === normalizeEntityName(stripBseListingGroupMarker(announcementCompanyName));
+}
+
+/**
+ * BSE sometimes appends a one-character listing group to the legal company name
+ * (for example, "Modison Ltd-$"). It is not part of the issuer identity. Only
+ * remove it when it follows a recognised legal suffix so meaningful name tokens
+ * can never be silently discarded.
+ */
+export function stripBseListingGroupMarker(name: string) {
+  const trimmed = name.trim();
+  const withoutMarker = trimmed.replace(bseTrailingGroupMarker, "").trim();
+  return withoutMarker !== trimmed && bseLegalSuffix.test(withoutMarker) ? withoutMarker : trimmed;
 }
 
 function provisionalHash(announcement: Announcement) {
@@ -185,6 +200,7 @@ export async function watchBse(input: {
     try {
       const announcements = await client.announcements({ scripCode: company.bseScripCode, from: input.since ?? since(state), to: now });
       consecutiveRequestFailures = 0;
+      let scripNameMismatchCount = 0;
       for (const announcement of announcements) {
         summary.announcementsSeen += 1;
         companyCounts.announcementsSeen += 1;
@@ -194,7 +210,7 @@ export async function watchBse(input: {
           await recordAnnouncement(db, company.id, announcement, "failed", mismatch);
           summary.failures += 1;
           companyCounts.failed += 1;
-          console.error(JSON.stringify({ source: "bse", event: "scrip_name_mismatch", company: company.slug, mapped_name: company.name, announcement_name: announcement.companyName, scrip_code: company.bseScripCode, announcement_id: announcement.bseAnnouncementId }));
+          scripNameMismatchCount += 1;
           continue;
         }
         const relevant = isRatingAnnouncement(announcement);
@@ -230,6 +246,17 @@ export async function watchBse(input: {
         await db.update(discoveredAnnouncements).set({ documentId: document.id, status: "linked" }).where(eq(discoveredAnnouncements.id, saved.id));
         summary.linked += 1;
         companyCounts.linked += 1;
+      }
+      if (scripNameMismatchCount > 0) {
+        console.error(JSON.stringify({
+          source: "bse",
+          event: "scrip_name_mismatch_summary",
+          company: company.slug,
+          mapped_name: company.name,
+          scrip_code: company.bseScripCode,
+          count: scripNameMismatchCount,
+          detail: "Individual mismatch details are recorded in discovered_announcements.",
+        }));
       }
     } catch (error) {
       summary.failures += 1;
@@ -292,4 +319,26 @@ export async function listBseWatchStatus(db: DatabaseClient) {
   }).from(discoveredAnnouncements).leftJoin(companies, eq(discoveredAnnouncements.companyId, companies.id))
     .where(eq(discoveredAnnouncements.source, "bse")).orderBy(sql`${discoveredAnnouncements.createdAt} desc`).limit(20);
   return { state: state[0] ?? null, announcements };
+}
+
+/** Read-only relevance-filter diagnostic; it never calls BSE or mutates the ledger. */
+export async function listBseIgnoredAnnouncements(db: DatabaseClient, input: { since?: Date } = {}) {
+  const conditions = [
+    eq(discoveredAnnouncements.source, "bse"),
+    eq(discoveredAnnouncements.status, "ignored"),
+    ...(input.since ? [gte(discoveredAnnouncements.announcementDate, input.since)] : []),
+  ];
+  return db.select({
+    id: discoveredAnnouncements.id,
+    externalId: discoveredAnnouncements.externalId,
+    company: companies.name,
+    scripCode: discoveredAnnouncements.scripCode,
+    headline: discoveredAnnouncements.headline,
+    category: discoveredAnnouncements.category,
+    announcementDate: discoveredAnnouncements.announcementDate,
+    attachmentUrl: discoveredAnnouncements.attachmentUrl,
+  }).from(discoveredAnnouncements)
+    .leftJoin(companies, eq(discoveredAnnouncements.companyId, companies.id))
+    .where(and(...conditions))
+    .orderBy(sql`${companies.name} asc`, sql`${discoveredAnnouncements.announcementDate} desc`);
 }
