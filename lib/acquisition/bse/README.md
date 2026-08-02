@@ -56,3 +56,11 @@ or CAPTCHA handling. `watcher_state.disabled_until` is set at least 24 hours
 ahead and `npm run watch:status` reports it. `npm run watch:bse -- --single
 --scrip <code>` performs one session bootstrap and one API-page request without
 touching the ledger, for bounded debugging.
+
+`--force` bypasses **only** the 30-minute poll-interval gate. It cannot bypass
+the inter-request delay, the 100-request cap, retries, circuit breaker, or a
+403/429 disable. `--since YYYY-MM-DD` is a manual backfill and implies that same
+interval bypass; it queries from that date, reports per-company counts, and does
+not advance the normal `last_announcement_date` watermark or `last_polled_at`
+cadence. `--single` likewise bypasses the poll interval only, while still
+honouring an active block and recording a 403/429 disable in `watcher_state`.

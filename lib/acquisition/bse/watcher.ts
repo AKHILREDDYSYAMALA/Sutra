@@ -31,7 +31,23 @@ export type BseWatchSummary = {
   ignored: number;
   failures: number;
   dryRun: boolean;
+  force: boolean;
+  since: string | null;
+  companyCounts: BseCompanyCounts[];
 };
+
+export type BseCompanyCounts = {
+  company: string;
+  scripCode: string | null;
+  announcementsSeen: number;
+  relevant: number;
+  linked: number;
+  ignored: number;
+  failed: number;
+  skipped?: "missing_bse_scrip_code";
+};
+
+export type BseWatcherState = typeof watcherState.$inferSelect;
 
 export function isRatingAnnouncement(announcement: Pick<Announcement, "headline" | "category" | "subCategory">) {
   return ratingLanguage.test([announcement.headline, announcement.category, announcement.subCategory].filter(Boolean).join(" "));
@@ -48,6 +64,41 @@ function provisionalHash(announcement: Announcement) {
 
 function since(state: typeof watcherState.$inferSelect | undefined) {
   return state?.lastAnnouncementDate ?? new Date(Date.now() - initialLookbackMs);
+}
+
+export async function getBseWatcherState(db: DatabaseClient): Promise<BseWatcherState | undefined> {
+  const [state] = await db.select().from(watcherState).where(eq(watcherState.source, "bse")).limit(1);
+  return state;
+}
+
+export async function disableBseWatcher(input: {
+  db: DatabaseClient;
+  state: BseWatcherState | undefined;
+  now: Date;
+  status: 403 | 429;
+  advancePoll: boolean;
+}) {
+  const disabledUntil = new Date(input.now.getTime() + BSE_BLOCK_COOLDOWN_MS);
+  const lastError = `BSE returned HTTP ${input.status}; disabled until ${disabledUntil.toISOString()}.`;
+  await input.db.insert(watcherState).values({
+    source: "bse",
+    lastPolledAt: input.advancePoll ? input.now : input.state?.lastPolledAt ?? null,
+    lastAnnouncementDate: input.state?.lastAnnouncementDate ?? null,
+    consecutiveFailures: 0,
+    lastError,
+    disabledUntil,
+  }).onConflictDoUpdate({
+    target: watcherState.source,
+    set: {
+      lastPolledAt: input.advancePoll ? input.now : input.state?.lastPolledAt ?? null,
+      lastAnnouncementDate: input.state?.lastAnnouncementDate ?? null,
+      consecutiveFailures: 0,
+      lastError,
+      disabledUntil,
+      updatedAt: sql`now()`,
+    },
+  });
+  return { disabledUntil, lastError };
 }
 
 async function recordAnnouncement(
@@ -87,14 +138,33 @@ async function recordAnnouncement(
 }
 
 /** One idempotent acquisition cycle. It never downloads or classifies a PDF. */
-export async function watchBse(input: { db: DatabaseClient; dryRun?: boolean; client?: BseClient; now?: Date }): Promise<BseWatchSummary> {
+export async function watchBse(input: {
+  db: DatabaseClient;
+  dryRun?: boolean;
+  force?: boolean;
+  since?: Date;
+  client?: BseClient;
+  now?: Date;
+}): Promise<BseWatchSummary> {
   const { db, dryRun = false } = input;
   const now = input.now ?? new Date();
   const client = input.client ?? new BseClient();
-  const [state] = await db.select().from(watcherState).where(eq(watcherState.source, "bse")).limit(1);
-  const summary: BseWatchSummary = { polledCompanies: 0, skippedCompanies: 0, announcementsSeen: 0, relevant: 0, linked: 0, ignored: 0, failures: 0, dryRun };
+  const state = await getBseWatcherState(db);
+  const manualBackfill = input.since !== undefined;
+  const force = input.force === true || manualBackfill;
+  const summary: BseWatchSummary = {
+    polledCompanies: 0, skippedCompanies: 0, announcementsSeen: 0, relevant: 0, linked: 0, ignored: 0, failures: 0,
+    dryRun, force, since: input.since?.toISOString() ?? null, companyCounts: [],
+  };
   if (state?.disabledUntil && state.disabledUntil > now) return { ...summary, skipped: "disabled_until" };
-  if (state && now.getTime() - (state.lastPolledAt?.getTime() ?? 0) < BSE_MIN_POLL_INTERVAL_MS) return { ...summary, skipped: "poll_interval" };
+  const pollIntervalActive = state && now.getTime() - (state.lastPolledAt?.getTime() ?? 0) < BSE_MIN_POLL_INTERVAL_MS;
+  if (pollIntervalActive && !force) return { ...summary, skipped: "poll_interval" };
+  if (pollIntervalActive && force) {
+    console.warn(JSON.stringify({
+      source: "bse", event: "poll_interval_bypassed", reason: manualBackfill ? "manual_since" : "force",
+      last_polled_at: state.lastPolledAt?.toISOString() ?? null, since: input.since?.toISOString() ?? null,
+    }));
+  }
   if ((state?.consecutiveFailures ?? 0) >= BSE_MAX_CONSECUTIVE_FAILURES) return { ...summary, skipped: "circuit_open" };
 
   const mappedCompanies = await db.select().from(companies);
@@ -102,24 +172,28 @@ export async function watchBse(input: { db: DatabaseClient; dryRun?: boolean; cl
   const sourceErrors: string[] = [];
   let transportFailures = 0;
   let consecutiveRequestFailures = 0;
-  let blockedUntil: Date | null = null;
   for (const company of mappedCompanies) {
     if (!company.bseScripCode) {
       summary.skippedCompanies += 1;
+      summary.companyCounts.push({ company: company.slug, scripCode: null, announcementsSeen: 0, relevant: 0, linked: 0, ignored: 0, failed: 0, skipped: "missing_bse_scrip_code" });
       console.warn(JSON.stringify({ source: "bse", event: "company_skipped", company: company.slug, reason: "missing_bse_scrip_code" }));
       continue;
     }
+    const companyCounts: BseCompanyCounts = { company: company.slug, scripCode: company.bseScripCode, announcementsSeen: 0, relevant: 0, linked: 0, ignored: 0, failed: 0 };
+    summary.companyCounts.push(companyCounts);
     summary.polledCompanies += 1;
     try {
-      const announcements = await client.announcements({ scripCode: company.bseScripCode, from: since(state), to: now });
+      const announcements = await client.announcements({ scripCode: company.bseScripCode, from: input.since ?? since(state), to: now });
       consecutiveRequestFailures = 0;
       for (const announcement of announcements) {
         summary.announcementsSeen += 1;
+        companyCounts.announcementsSeen += 1;
         if (!latestAnnouncementDate || announcement.announcementDate > latestAnnouncementDate) latestAnnouncementDate = announcement.announcementDate;
         if (!bseCompanyNameMatches(company.name, announcement.companyName)) {
           const mismatch = `BSE scrip-name mismatch: mapped '${company.name}' but announcement names '${announcement.companyName}' (scrip ${company.bseScripCode}).`;
           await recordAnnouncement(db, company.id, announcement, "failed", mismatch);
           summary.failures += 1;
+          companyCounts.failed += 1;
           console.error(JSON.stringify({ source: "bse", event: "scrip_name_mismatch", company: company.slug, mapped_name: company.name, announcement_name: announcement.companyName, scrip_code: company.bseScripCode, announcement_id: announcement.bseAnnouncementId }));
           continue;
         }
@@ -127,13 +201,16 @@ export async function watchBse(input: { db: DatabaseClient; dryRun?: boolean; cl
         const saved = await recordAnnouncement(db, company.id, announcement, relevant && announcement.attachmentUrl ? "new" : "ignored");
         if (!relevant || !announcement.attachmentUrl) {
           summary.ignored += 1;
+          companyCounts.ignored += 1;
           if (saved.status !== "ignored") await db.update(discoveredAnnouncements).set({ status: "ignored" }).where(eq(discoveredAnnouncements.id, saved.id));
           continue;
         }
         summary.relevant += 1;
+        companyCounts.relevant += 1;
         if (saved.documentId) continue;
         if (dryRun) {
           summary.linked += 1;
+          companyCounts.linked += 1;
           continue;
         }
         const [createdDocument] = await db.insert(documents).values({
@@ -152,16 +229,18 @@ export async function watchBse(input: { db: DatabaseClient; dryRun?: boolean; cl
         if (!document) throw new Error(`Could not create document for BSE announcement ${announcement.bseAnnouncementId}.`);
         await db.update(discoveredAnnouncements).set({ documentId: document.id, status: "linked" }).where(eq(discoveredAnnouncements.id, saved.id));
         summary.linked += 1;
+        companyCounts.linked += 1;
       }
     } catch (error) {
       summary.failures += 1;
+      companyCounts.failed += 1;
       transportFailures += 1;
       const message = error instanceof Error ? error.message : String(error);
       sourceErrors.push(`${company.slug}: ${message}`);
       if (error instanceof BseBlockedError) {
-        blockedUntil = new Date(now.getTime() + BSE_BLOCK_COOLDOWN_MS);
-        console.error(JSON.stringify({ source: "bse", event: "source_blocked", status: error.status, disabled_until: blockedUntil.toISOString(), company: company.slug }));
-        break;
+        const { disabledUntil } = await disableBseWatcher({ db, state, now, status: error.status as 403 | 429, advancePoll: !manualBackfill });
+        console.error(JSON.stringify({ source: "bse", event: "source_blocked", status: error.status, disabled_until: disabledUntil.toISOString(), company: company.slug }));
+        return { ...summary, skipped: "disabled_until" };
       }
       if (error instanceof BseRequestLimitError) {
         console.warn(JSON.stringify({ source: "bse", event: "request_limit_reached", limit: BSE_MAX_REQUESTS_PER_RUN, company: company.slug }));
@@ -179,26 +258,24 @@ export async function watchBse(input: { db: DatabaseClient; dryRun?: boolean; cl
   // immediately after this first status check.
   if (summary.polledCompanies === 0) return { ...summary, skipped: "no_mapped_companies" };
   const failed = transportFailures > 0;
-  const nextWatermark = failed
+  const nextWatermark = manualBackfill
+    ? state?.lastAnnouncementDate ?? null
+    : failed
     ? state?.lastAnnouncementDate ?? null
     : latestAnnouncementDate ?? now;
-  const nextConsecutiveFailures = blockedUntil
-    ? 0
-    : failed
-      ? (state?.consecutiveFailures ?? 0) + 1
-      : 0;
+  const nextConsecutiveFailures = failed ? (state?.consecutiveFailures ?? 0) + 1 : 0;
   await db.insert(watcherState).values({
-    source: "bse", lastPolledAt: now, lastAnnouncementDate: nextWatermark,
+    source: "bse", lastPolledAt: manualBackfill ? state?.lastPolledAt ?? null : now, lastAnnouncementDate: nextWatermark,
     consecutiveFailures: nextConsecutiveFailures,
     lastError: failed ? sourceErrors.join(" | ").slice(0, 2_000) : null,
-    disabledUntil: blockedUntil,
+    disabledUntil: null,
   }).onConflictDoUpdate({
     target: watcherState.source,
     set: {
-      lastPolledAt: now, lastAnnouncementDate: nextWatermark,
+      lastPolledAt: manualBackfill ? state?.lastPolledAt ?? null : now, lastAnnouncementDate: nextWatermark,
       consecutiveFailures: nextConsecutiveFailures,
       lastError: failed ? sourceErrors.join(" | ").slice(0, 2_000) : null,
-      disabledUntil: blockedUntil,
+      disabledUntil: null,
       updatedAt: sql`now()`,
     },
   });
