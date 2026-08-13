@@ -282,13 +282,15 @@ export async function advanceDocumentStatus(
 
 /**
  * Schedules a retry without changing processing stage. The delay is five
- * minutes doubled per attempt, capped at 24 hours; permanent failures use
+ * minutes doubled per attempt, capped at 24 hours; callers may add a hard
+ * `notBefore` floor for a source-level cooldown. Permanent failures use
  * markDocumentFailed instead.
  */
 export async function scheduleDocumentRetry(
   db: DatabaseClient,
   documentId: string,
   error: string,
+  options: { notBefore?: Date } = {},
 ): Promise<Document> {
   return db.transaction(async (tx) => {
     const [current] = await tx
@@ -310,11 +312,14 @@ export async function scheduleDocumentRetry(
       24 * 60 * 60,
     );
 
+    const nextAttemptAt = options.notBefore
+      ? sql`greatest(now() + ${delaySeconds} * interval '1 second', ${options.notBefore.toISOString()}::timestamptz)`
+      : sql`now() + ${delaySeconds} * interval '1 second'`;
     const [updated] = await tx
       .update(documents)
       .set({
         lastError: error,
-        nextAttemptAt: sql`now() + ${delaySeconds} * interval '1 second'`,
+        nextAttemptAt,
         updatedAt: sql`now()`,
       })
       .where(eq(documents.id, documentId))

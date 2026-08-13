@@ -29,6 +29,8 @@ export type BseClientOptions = {
   userAgent?: string;
 };
 
+type BseRequestOptions = Pick<RequestInit, "signal" | "redirect">;
+
 export class BseRequestError extends Error {
   readonly status: number | null;
   readonly attempts: number;
@@ -172,6 +174,24 @@ export class BseClient {
     return results;
   }
 
+  /**
+   * Download an AttachLive PDF through the same browser session as announcements.
+   * The session cookie, headers, request counter, pacing and retry policy all stay
+   * here; ingestion only decides which source strategy to use.
+   */
+  async downloadAttachment(url: string, options: BseRequestOptions = {}): Promise<Response> {
+    const hadSession = this.sessionEstablished;
+    try {
+      return await this.downloadAttachmentWithSession(url, options);
+    } catch (error) {
+      // A session can expire between API discovery and the attachment fetch. One
+      // clean bootstrap is allowed; a second 403/429 is a real source block.
+      if (!(error instanceof BseBlockedError) || !hadSession) throw error;
+      this.resetSession();
+      return this.downloadAttachmentWithSession(url, options);
+    }
+  }
+
   private cookieHeader() {
     return [...this.cookies.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
   }
@@ -197,9 +217,9 @@ export class BseClient {
     this.requestCount += 1;
   }
 
-  private async send(url: URL | string, headers: Record<string, string>) {
+  private async send(url: URL | string, headers: Record<string, string>, options: BseRequestOptions = {}) {
     await this.waitForRequestSlot();
-    const response = await this.request(url, { headers });
+    const response = await this.request(url, { headers, redirect: "follow", ...options });
     this.rememberCookies(response);
     return response;
   }
@@ -232,16 +252,57 @@ export class BseClient {
     };
   }
 
+  private attachmentHeaders(): Record<string, string> {
+    return {
+      ...this.xhrHeaders(),
+      accept: "application/pdf,application/octet-stream;q=0.9,*/*;q=0.8",
+      "sec-fetch-dest": "document",
+      "sec-fetch-mode": "navigate",
+      "sec-fetch-site": "same-origin",
+    };
+  }
+
   private errorForStatus(operation: string, status: number) {
     if (status === 403 || status === 429) return new BseBlockedError(status);
     return new BseRequestError(`${operation} HTTP ${status}.`, { status });
   }
 
-  private async establishSession() {
+  private resetSession() {
+    this.sessionEstablished = false;
+    this.cookies.clear();
+  }
+
+  private async establishSession(options: BseRequestOptions = {}) {
     if (this.sessionEstablished) return;
-    const response = await this.send(BSE_ANNOUNCEMENTS_PAGE, this.documentHeaders());
+    const response = await this.send(BSE_ANNOUNCEMENTS_PAGE, this.documentHeaders(), options);
     if (response.status !== 200) throw this.errorForStatus("BSE announcements session", response.status);
     this.sessionEstablished = true;
+  }
+
+  private async withRetries<T>(operation: string, request: () => Promise<T>): Promise<T> {
+    let lastError: BseRequestError | undefined;
+    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
+      try {
+        return await request();
+      } catch (error) {
+        if (error instanceof BseBlockedError || error instanceof BseRequestLimitError) throw error;
+        lastError = error instanceof BseRequestError ? error : new BseRequestError(String(error));
+        if (attempt < this.maxAttempts) await delay(Math.min(30_000, 1_000 * 2 ** (attempt - 1)));
+      }
+    }
+    throw new BseRequestError(`${operation} failed after ${this.maxAttempts} attempt(s): ${lastError?.message ?? "unknown error"}`, {
+      status: lastError?.status,
+      attempts: this.maxAttempts,
+    });
+  }
+
+  private async downloadAttachmentWithSession(url: string, options: BseRequestOptions) {
+    return this.withRetries("BSE attachment download", async () => {
+      await this.establishSession(options);
+      const response = await this.send(url, this.attachmentHeaders(), options);
+      if (response.status !== 200) throw this.errorForStatus("BSE attachment download", response.status);
+      return response;
+    });
   }
 
   private async requestPage(input: { scripCode: string; from: Date; to: Date; page: number }): Promise<BseResponse> {
@@ -250,24 +311,21 @@ export class BseClient {
       pageno: String(input.page), strCat: "-1", subcategory: "-1", strPrevDate: dateParam(input.from),
       strToDate: dateParam(input.to), strSearch: "P", strscrip: input.scripCode, strType: "C",
     }).toString();
-    let lastError: BseRequestError | undefined;
-    for (let attempt = 1; attempt <= this.maxAttempts; attempt += 1) {
-      try {
-        await this.establishSession();
-        const response = await this.send(url, this.xhrHeaders());
-        if (response.status !== 200) throw this.errorForStatus("BSE announcements", response.status);
-        const body: unknown = await response.json();
-        if (!body || typeof body !== "object") throw new BseRequestError("BSE announcements response was not an object.");
-        return body as BseResponse;
-      } catch (error) {
-        if (error instanceof BseBlockedError || error instanceof BseRequestLimitError) throw error;
-        lastError = error instanceof BseRequestError ? error : new BseRequestError(String(error));
-        if (attempt < this.maxAttempts) await delay(Math.min(30_000, 1_000 * 2 ** (attempt - 1)));
-      }
-    }
-    throw new BseRequestError(`BSE announcements failed after ${this.maxAttempts} attempt(s): ${lastError?.message ?? "unknown error"}`, {
-      status: lastError?.status,
-      attempts: this.maxAttempts,
+    return this.withRetries("BSE announcements", async () => {
+      await this.establishSession();
+      const response = await this.send(url, this.xhrHeaders());
+      if (response.status !== 200) throw this.errorForStatus("BSE announcements", response.status);
+      const body: unknown = await response.json();
+      if (!body || typeof body !== "object") throw new BseRequestError("BSE announcements response was not an object.");
+      return body as BseResponse;
     });
   }
+}
+
+let sharedBseClient: BseClient | undefined;
+
+/** One process-local BSE session and request budget shared by all BSE work. */
+export function getBseClient() {
+  sharedBseClient ??= new BseClient();
+  return sharedBseClient;
 }

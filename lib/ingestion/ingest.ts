@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
-import path from "node:path";
 
 import { eq, sql } from "drizzle-orm";
 
 import { claims, companies, documents } from "@/db/schema";
 import { seedKnownEntityMergeRejections } from "@/db/known-entity-rejections";
 import { parseReportDate, slugify } from "@/db/static-graphs";
+import { BseBlockedError } from "@/lib/acquisition/bse/client";
+import { disableBseWatcher, getBseWatcherState } from "@/lib/acquisition/bse/watcher";
 import { advanceDocumentStatus, getDb, scheduleDocumentRetry, type DatabaseClient } from "@/lib/db";
 import { extract, extractPdfText, type ExtractedDocument, type ExtractedPdfText } from "@/lib/extraction/extract";
 import { canonicalizeEntityName, normalizeEntityName } from "@/lib/entity-normalization";
@@ -16,10 +17,8 @@ import { extractionTelemetry, storedExtractionTelemetry, type ExtractionTelemetr
 import { mergeRejectedQuoteDiagnostics, type RejectedQuoteDiagnostic } from "./quote-mismatches";
 import { rawRelationshipPhraseFromQuote } from "./relationship-phrases";
 import { isMalformedDualTargetEdge, resolveGraphEntities, relationTypeFor } from "./resolve-entities";
+import { assertPdfInput, downloadPdfForSource, type DownloadStrategyRegistry, type PdfInput } from "./download-strategies";
 import { downloadDocumentPdf, uploadDocumentPdf } from "./storage";
-
-const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const FETCH_TIMEOUT_MS = 30_000;
 
 export type IngestSource = "bse" | "nse" | "crisil" | "icra" | "care" | "india_ratings" | "user_upload" | "manual";
 
@@ -43,6 +42,7 @@ export type IngestDocumentInput = {
     uploadDocumentPdf: typeof uploadDocumentPdf;
     extractPdfText: typeof extractPdfText;
     extract: (fileBuffer: Buffer, text?: ExtractedPdfText) => Promise<ExtractedDocument>;
+    downloadStrategies: DownloadStrategyRegistry;
   }>;
 };
 
@@ -60,11 +60,47 @@ export type IngestDocumentResult = {
   extractionTelemetry?: ExtractionTelemetry;
 };
 
-type PdfInput = { bytes: Buffer; title: string; url: string | null };
+class BseSourceDisabledError extends Error {
+  constructor(readonly disabledUntil: Date) {
+    super(`BSE source is disabled until ${disabledUntil.toISOString()}.`);
+    this.name = "BseSourceDisabledError";
+  }
+}
 
-function assertPdf(bytes: Buffer) {
-  if (bytes.length === 0 || bytes.length > MAX_FILE_BYTES) throw new Error("PDF must be non-empty and no larger than 10MB.");
-  if (!bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("The source is not a PDF.");
+async function ensureSourceAvailable(db: DatabaseClient, input: Pick<IngestDocumentInput, "source" | "url">) {
+  // A stored BSE PDF can be reprocessed during a source cooldown because it
+  // makes no request to BSE. Only a fresh AttachLive download is gated.
+  if (input.source !== "bse" || !input.url) return;
+  const state = await getBseWatcherState(db);
+  if (state?.disabledUntil && state.disabledUntil > new Date()) throw new BseSourceDisabledError(state.disabledUntil);
+}
+
+async function scheduleDownloadFailure(input: {
+  db: DatabaseClient;
+  ingestion: IngestDocumentInput;
+  error: unknown;
+}) {
+  if (!input.ingestion.existingDocumentId) return;
+  const message = input.error instanceof Error ? input.error.message : String(input.error);
+  let notBefore: Date | undefined;
+  if (input.ingestion.source === "bse") {
+    if (input.error instanceof BseBlockedError) {
+      const state = await getBseWatcherState(input.db);
+      const status = input.error.status;
+      if (status !== 403 && status !== 429) throw new Error("BSE block error did not include a valid HTTP status.");
+      const disabled = await disableBseWatcher({
+        db: input.db,
+        state,
+        now: new Date(),
+        status,
+        advancePoll: false,
+      });
+      notBefore = disabled.disabledUntil;
+    } else if (input.error instanceof BseSourceDisabledError) {
+      notBefore = input.error.disabledUntil;
+    }
+  }
+  await scheduleDocumentRetry(input.db, input.ingestion.existingDocumentId, message.slice(0, 2_000), { notBefore });
 }
 
 export function sourceForUrl(url: string): IngestSource {
@@ -78,54 +114,11 @@ export function sourceForUrl(url: string): IngestSource {
   return "manual";
 }
 
-async function downloadPdf(url: string): Promise<PdfInput> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: { "user-agent": "Sutra document ingestion/1.0 (+https://sutra.local)" },
-      redirect: "follow",
-    });
-    if (!response.ok) throw new Error(`Download failed with HTTP ${response.status}.`);
-    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
-    if (!contentType.includes("application/pdf")) throw new Error(`Expected application/pdf, received ${contentType || "no content type"}.`);
-    const contentLength = response.headers.get("content-length");
-    if (contentLength && Number(contentLength) > MAX_FILE_BYTES) throw new Error("PDF is larger than 10MB.");
-    if (!response.body) throw new Error("Download returned no response body.");
-
-    const reader = response.body.getReader();
-    const chunks: Uint8Array[] = [];
-    let length = 0;
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      length += value.byteLength;
-      if (length > MAX_FILE_BYTES) {
-        await reader.cancel();
-        throw new Error("PDF is larger than 10MB.");
-      }
-      chunks.push(value);
-    }
-    const bytes = Buffer.concat(chunks);
-    assertPdf(bytes);
-    const disposition = response.headers.get("content-disposition") ?? "";
-    const named = /filename\*?=(?:UTF-8'')?\"?([^\";]+)/i.exec(disposition)?.[1];
-    return { bytes, title: decodeURIComponent(named ?? (path.basename(new URL(url).pathname) || "Untitled PDF")), url };
-  } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") throw new Error("Download timed out after 30 seconds.");
-    throw error;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
 async function loadPdf(input: IngestDocumentInput): Promise<PdfInput> {
   if (Boolean(input.url) === Boolean(input.fileBuffer)) throw new Error("Provide exactly one of url or fileBuffer.");
-  if (input.url) return downloadPdf(input.url);
+  if (input.url) return downloadPdfForSource({ source: input.source, url: input.url, registry: input.services?.downloadStrategies });
   const bytes = input.fileBuffer!;
-  assertPdf(bytes);
+  assertPdfInput(bytes);
   return { bytes, title: input.title ?? input.fileName ?? "Uploaded PDF", url: null };
 }
 
@@ -297,7 +290,14 @@ export async function ingestDocument(input: IngestDocumentInput): Promise<Ingest
   const uploadPdf = input.services?.uploadDocumentPdf ?? uploadDocumentPdf;
   const extractText = input.services?.extractPdfText ?? extractPdfText;
   const extractGraph = input.services?.extract ?? extract;
-  const sourcePdf = await loadPdf(input);
+  let sourcePdf: PdfInput;
+  try {
+    await ensureSourceAvailable(db, input);
+    sourcePdf = await loadPdf(input);
+  } catch (error) {
+    await scheduleDownloadFailure({ db, ingestion: input, error });
+    throw error;
+  }
   const sha256 = createHash("sha256").update(sourcePdf.bytes).digest("hex");
   const prepared = input.existingDocumentId
     ? await useExistingDocument(db, input.existingDocumentId, sha256)

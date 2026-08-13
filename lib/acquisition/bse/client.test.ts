@@ -69,6 +69,29 @@ test("BSE client establishes a session and carries its browser-equivalent XHR he
   assert.equal(xhrHeaders?.get("cookie"), "bse_session=abc123");
 });
 
+test("BSE attachment downloads reuse the BSE session, headers, and request budget", async () => {
+  const requestHeaders: Headers[] = [];
+  const client = new BseClient({
+    fetch: async (_input, init) => {
+      requestHeaders.push(new Headers(init?.headers));
+      if (requestHeaders.length === 1) {
+        return new Response("", { headers: { "set-cookie": "bse_session=download123; Path=/; HttpOnly" } });
+      }
+      return new Response("%PDF-fixture", { headers: { "content-type": "application/pdf" } });
+    },
+  });
+
+  const response = await client.downloadAttachment("https://www.bseindia.com/xml-data/corpfiling/AttachLive/fixture.pdf");
+  const [, attachmentHeaders] = requestHeaders;
+
+  assert.equal(response.status, 200);
+  assert.equal(client.requestsMade, 2);
+  assert.match(attachmentHeaders?.get("accept") ?? "", /^application\/pdf/);
+  assert.equal(attachmentHeaders?.get("referer"), "https://www.bseindia.com/corporates/ann.html");
+  assert.equal(attachmentHeaders?.get("cookie"), "bse_session=download123");
+  assert.equal(attachmentHeaders?.get("sec-fetch-site"), "same-origin");
+});
+
 test("BSE stops immediately instead of retrying a block response", async () => {
   let calls = 0;
   const client = new BseClient({

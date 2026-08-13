@@ -12,12 +12,15 @@ import {
   eventEntities,
   events,
   users,
+  watcherState,
   watchlists,
 } from "./schema";
 import { requiredDirectUrl } from "./env";
+import { BseBlockedError } from "../lib/acquisition/bse/client";
 import { createDatabaseClient, type DatabaseClient } from "../lib/db/client";
 import { ingestDocument } from "../lib/ingestion/ingest";
 import { quoteHashFor } from "../lib/ingestion/claim-reconciliation";
+import type { DownloadStrategy } from "../lib/ingestion/download-strategies";
 import { reprocessDocument } from "../lib/ingestion/reprocess";
 
 class SmokeRollback extends Error {}
@@ -415,6 +418,43 @@ async function smoke() {
         .where(eq(documents.id, excludedDocument.id))
         .returning();
       assert.equal(reclassifiedDocument?.status, "discovered", "an excluded document can be reclassified from discovery");
+
+      // A BSE attachment block is a source-level cooldown, not a terminal
+      // document failure. The worker must leave this audit row discoverable and
+      // defer it until the same 24-hour source disable expires.
+      const [blockedBseDocument] = await tx
+        .insert(documents)
+        .values({
+          companyId: company.id,
+          source: "bse",
+          url: "https://www.bseindia.com/xml-data/corpfiling/AttachLive/blocked.pdf",
+          sha256: "d".repeat(64),
+          status: "discovered",
+          attempts: 1,
+        })
+        .returning();
+      assert.ok(blockedBseDocument);
+      const bseBlockedDownload: DownloadStrategy = {
+        id: "bse",
+        fetch: async () => { throw new BseBlockedError(403); },
+      };
+      await assert.rejects(
+        ingestDocument({
+          db: tx as unknown as DatabaseClient,
+          existingDocumentId: blockedBseDocument.id,
+          source: "bse",
+          url: blockedBseDocument.url!,
+          services: { downloadStrategies: new Map([["bse", bseBlockedDownload]]) },
+        }),
+        BseBlockedError,
+      );
+      const [deferredBseDocument] = await tx.select().from(documents).where(eq(documents.id, blockedBseDocument.id));
+      assert.equal(deferredBseDocument?.status, "discovered");
+      assert.match(deferredBseDocument?.lastError ?? "", /HTTP 403/);
+      assert.ok(deferredBseDocument?.nextAttemptAt && deferredBseDocument.nextAttemptAt.getTime() > Date.now() + 23 * 60 * 60 * 1_000);
+      const [bseState] = await tx.select().from(watcherState).where(eq(watcherState.source, "bse"));
+      assert.ok(bseState?.disabledUntil && bseState.disabledUntil.getTime() > Date.now() + 23 * 60 * 60 * 1_000);
+      assert.match(bseState?.lastError ?? "", /HTTP 403/);
 
       await expectConstraint("claim substance update", () =>
         tx.transaction(async (savepoint) => {

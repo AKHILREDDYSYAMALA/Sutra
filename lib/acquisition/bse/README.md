@@ -60,6 +60,12 @@ ahead and `npm run watch:status` reports it. `npm run watch:bse -- --single
 --scrip <code>` performs one session bootstrap and one API-page request without
 touching the ledger, for bounded debugging.
 
+AttachLive PDF downloads use the same process-local BSE client as announcement
+requests: they reuse its cookie session (or bootstrap one), browser-equivalent
+headers and BSE `Referer`, three-second pacing, retry backoff and 100-request
+budget. A 403/429 leaves the document in `discovered`, defers its next retry to
+the 24-hour source cooldown, and records the source error in `watcher_state`.
+
 `--force` bypasses **only** the 30-minute poll-interval gate. It cannot bypass
 the inter-request delay, the 100-request cap, retries, circuit breaker, or a
 403/429 disable. `--since YYYY-MM-DD` is a manual backfill and implies that same

@@ -14,6 +14,7 @@ import {
   BseClient,
   BseRequestError,
   BseRequestLimitError,
+  getBseClient,
   type Announcement,
 } from "./client";
 
@@ -163,7 +164,7 @@ export async function watchBse(input: {
 }): Promise<BseWatchSummary> {
   const { db, dryRun = false } = input;
   const now = input.now ?? new Date();
-  const client = input.client ?? new BseClient();
+  const client = input.client ?? getBseClient();
   const state = await getBseWatcherState(db);
   const manualBackfill = input.since !== undefined;
   const force = input.force === true || manualBackfill;
