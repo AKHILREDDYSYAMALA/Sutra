@@ -149,8 +149,13 @@ test("specificity ranks rare single points ahead of ubiquitous ones without filt
 test("parseReportDate accepts only the documented strict date forms", () => {
   assert.equal(parseReportDate("2026-06-25"), "2026-06-25");
   assert.equal(parseReportDate("June 25, 2026"), "2026-06-25");
+  assert.equal(parseReportDate("June 25 2026"), "2026-06-25");
   assert.equal(parseReportDate("25 June 2026"), "2026-06-25");
+  assert.equal(parseReportDate("25 June, 2026"), "2026-06-25");
   assert.equal(parseReportDate("25-06-2026"), "2026-06-25");
+  assert.equal(parseReportDate("10th March, 2026"), "2026-03-10");
+  assert.equal(parseReportDate("1st April 2026"), "2026-04-01");
+  assert.equal(parseReportDate("23rd Dec, 2025"), "2025-12-23");
 
   const abbreviations = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   abbreviations.forEach((month, index) => {
@@ -161,7 +166,7 @@ test("parseReportDate accepts only the documented strict date forms", () => {
     assert.equal(parseReportDate(`1 ${month}. 2026`), expected, `day-first ${month}.`);
   });
 
-  ["2026/06/25", "25/06/2026", "June 25 2026", "25 June, 2026", "Junx 25, 2026", "2026-13-01"].forEach((value) => {
-    assert.throws(() => parseReportDate(value), /Unsupported report_date|Invalid report_date/, value);
+  ["2026/06/25", "25/06/2026", "Junx 25, 2026", "10st March, 2026", "11st March, 2026", "2026-13-01"].forEach((value) => {
+    assert.throws(() => parseReportDate(value), /Unsupported report_date|Invalid (ordinal day|report_date)/, value);
   });
 });

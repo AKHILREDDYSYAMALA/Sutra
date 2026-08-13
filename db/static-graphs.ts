@@ -189,16 +189,17 @@ export function parseReportDate(raw: string): string {
   };
   // Strictly recognize a named month only; we do not hand the input to Date.parse.
   const namedMonth = "(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan\\.?|Feb\\.?|Mar\\.?|Apr\\.?|May\\.?|Jun\\.?|Jul\\.?|Aug\\.?|Sep\\.?|Oct\\.?|Nov\\.?|Dec\\.?)";
-  const monthFirst = new RegExp(`^(${namedMonth}) (\\d{1,2}), (\\d{4})$`, "i").exec(raw);
+  const namedDay = "(\\d{1,2})(st|nd|rd|th)?";
+  const monthFirst = new RegExp(`^(${namedMonth}) ${namedDay},? (\\d{4})$`, "i").exec(raw);
   if (monthFirst) {
     const month = monthNumber(monthFirst[1]!);
-    if (month) return validatedIsoDate(Number(monthFirst[3]), month, Number(monthFirst[2]), raw);
+    if (month) return validatedIsoDate(Number(monthFirst[4]), month, parseNamedDay(monthFirst[2]!, monthFirst[3], raw), raw);
   }
 
-  const dayFirst = new RegExp(`^(\\d{1,2}) (${namedMonth}) (\\d{4})$`, "i").exec(raw);
+  const dayFirst = new RegExp(`^${namedDay} (${namedMonth}),? (\\d{4})$`, "i").exec(raw);
   if (dayFirst) {
-    const month = monthNumber(dayFirst[2]!);
-    if (month) return validatedIsoDate(Number(dayFirst[3]), month, Number(dayFirst[1]), raw);
+    const month = monthNumber(dayFirst[3]!);
+    if (month) return validatedIsoDate(Number(dayFirst[4]), month, parseNamedDay(dayFirst[1]!, dayFirst[2], raw), raw);
   }
 
   const dayMonthYear = /^(\d{2})-(\d{2})-(\d{4})$/.exec(raw);
@@ -206,7 +207,22 @@ export function parseReportDate(raw: string): string {
     return validatedIsoDate(Number(dayMonthYear[3]), Number(dayMonthYear[2]), Number(dayMonthYear[1]), raw);
   }
 
-  throw new Error(`Unsupported report_date ${JSON.stringify(raw)}. Expected YYYY-MM-DD, Month DD, YYYY, DD Month YYYY, or DD-MM-YYYY.`);
+  throw new Error(`Unsupported report_date ${JSON.stringify(raw)}. Expected YYYY-MM-DD, named-month dates (optionally with a valid ordinal day suffix and comma), or DD-MM-YYYY.`);
+}
+
+function parseNamedDay(dayRaw: string, ordinalSuffix: string | undefined, original: string): number {
+  const day = Number(dayRaw);
+  if (!ordinalSuffix) return day;
+
+  const lastTwoDigits = day % 100;
+  const expectedSuffix = lastTwoDigits >= 11 && lastTwoDigits <= 13
+    ? "th"
+    : (["th", "st", "nd", "rd"][day % 10] ?? "th");
+  if (ordinalSuffix.toLowerCase() !== expectedSuffix) {
+    throw new Error(`Invalid ordinal day in report_date ${JSON.stringify(original)}.`);
+  }
+
+  return day;
 }
 
 function validatedIsoDate(year: number, month: number, day: number, original: string): string {
