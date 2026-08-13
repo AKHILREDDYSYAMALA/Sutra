@@ -47,6 +47,19 @@ Rows observed by the site use fields such as `NEWSID`, `SCRIP_CD`, `SLONGNAME`,
 is the only code that understands those payload names. Attachment names are
 turned into `https://www.bseindia.com/xml-data/corpfiling/AttachLive/...` URLs.
 
+### Attachment archive behavior (13 August 2026)
+
+For the saved Bharat Forge filing `537c3136-0a04-44ed-9d4e-267815b8f178.pdf`,
+a session-authenticated `AttachLive` request returned 404 while the identical
+filename under `AttachHis` returned `200 application/pdf`. The sampled failed
+API payloads provided only `ATTACHMENTNAME`, `FILESTATUS: "N"`, and size—no
+attachment path or live/historical flag. When BSE does provide an absolute or
+relative attachment path, Sutra preserves it. Otherwise the filename begins at
+`AttachLive`; only after its 404 does the client try `AttachHis` once. Both
+requests count toward the same pace and request budget. A 404 on both paths is
+terminal: the document is marked `failed` with both attempted URLs, rather than
+being retried indefinitely.
+
 Paginate only while a full page is returned. The watcher requests one mapped
 scrip at a time, waits at least three seconds between **all** BSE requests
 (including session setup), limits a run to 100 requests, retries a non-200 or
@@ -60,7 +73,7 @@ ahead and `npm run watch:status` reports it. `npm run watch:bse -- --single
 --scrip <code>` performs one session bootstrap and one API-page request without
 touching the ledger, for bounded debugging.
 
-AttachLive PDF downloads use the same process-local BSE client as announcement
+BSE PDF downloads use the same process-local BSE client as announcement
 requests: they reuse its cookie session (or bootstrap one), browser-equivalent
 headers and BSE `Referer`, three-second pacing, retry backoff and 100-request
 budget. A 403/429 leaves the document in `discovered`, defers its next retry to

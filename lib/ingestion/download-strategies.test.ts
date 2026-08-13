@@ -9,16 +9,16 @@ test("a BSE-source document routes through the BSE strategy while user uploads u
   const calls: string[] = [];
   const bse: DownloadStrategy = {
     id: "bse",
-    fetch: async () => {
+    fetch: async ({ url }) => {
       calls.push("bse");
-      return pdfResponse();
+      return { response: pdfResponse(), url };
     },
   };
   const fallback: DownloadStrategy = {
     id: "default",
-    fetch: async () => {
+    fetch: async ({ url }) => {
       calls.push("default");
-      return pdfResponse();
+      return { response: pdfResponse(), url };
     },
   };
   const registry = new Map([["bse" as const, bse]]);

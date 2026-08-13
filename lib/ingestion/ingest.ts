@@ -5,9 +5,9 @@ import { eq, sql } from "drizzle-orm";
 import { claims, companies, documents } from "@/db/schema";
 import { seedKnownEntityMergeRejections } from "@/db/known-entity-rejections";
 import { parseReportDate, slugify } from "@/db/static-graphs";
-import { BseBlockedError } from "@/lib/acquisition/bse/client";
+import { BseAttachmentNotFoundError, BseBlockedError } from "@/lib/acquisition/bse/client";
 import { disableBseWatcher, getBseWatcherState } from "@/lib/acquisition/bse/watcher";
-import { advanceDocumentStatus, getDb, scheduleDocumentRetry, type DatabaseClient } from "@/lib/db";
+import { advanceDocumentStatus, getDb, markDocumentFailed, scheduleDocumentRetry, type DatabaseClient } from "@/lib/db";
 import { extract, extractPdfText, type ExtractedDocument, type ExtractedPdfText } from "@/lib/extraction/extract";
 import { canonicalizeEntityName, normalizeEntityName } from "@/lib/entity-normalization";
 
@@ -84,6 +84,10 @@ async function scheduleDownloadFailure(input: {
   const message = input.error instanceof Error ? input.error.message : String(input.error);
   let notBefore: Date | undefined;
   if (input.ingestion.source === "bse") {
+    if (input.error instanceof BseAttachmentNotFoundError) {
+      await markDocumentFailed(input.db, input.ingestion.existingDocumentId, message.slice(0, 2_000));
+      return;
+    }
     if (input.error instanceof BseBlockedError) {
       const state = await getBseWatcherState(input.db);
       const status = input.error.status;

@@ -7,10 +7,11 @@ const FETCH_TIMEOUT_MS = 30_000;
 
 export type DownloadSource = "bse" | "nse" | "crisil" | "icra" | "care" | "india_ratings" | "user_upload" | "manual";
 export type PdfInput = { bytes: Buffer; title: string; url: string | null };
+export type DownloadResponse = { response: Response; url: string };
 
 export type DownloadStrategy = {
   id: "default" | "bse";
-  fetch: (input: { url: string; signal: AbortSignal }) => Promise<Response>;
+  fetch: (input: { url: string; signal: AbortSignal }) => Promise<DownloadResponse>;
 };
 
 export type DownloadStrategyRegistry = ReadonlyMap<DownloadSource, DownloadStrategy>;
@@ -23,10 +24,13 @@ function assertPdf(bytes: Buffer) {
 export function defaultDownloadStrategy(fetchImplementation: typeof fetch = fetch): DownloadStrategy {
   return {
     id: "default",
-    fetch: ({ url, signal }) => fetchImplementation(url, {
-      signal,
-      headers: { "user-agent": "Sutra document ingestion/1.0 (+https://sutra.local)" },
-      redirect: "follow",
+    fetch: async ({ url, signal }) => ({
+      response: await fetchImplementation(url, {
+        signal,
+        headers: { "user-agent": "Sutra document ingestion/1.0 (+https://sutra.local)" },
+        redirect: "follow",
+      }),
+      url,
     }),
   };
 }
@@ -34,7 +38,7 @@ export function defaultDownloadStrategy(fetchImplementation: typeof fetch = fetc
 export function bseDownloadStrategy(client: BseClient = getBseClient()): DownloadStrategy {
   return {
     id: "bse",
-    fetch: ({ url, signal }) => client.downloadAttachment(url, { signal }),
+    fetch: ({ url, signal }) => client.downloadAttachmentWithPath(url, { signal }),
   };
 }
 
@@ -51,7 +55,8 @@ export function strategyForSource(
   return registry.get(source) ?? fallback;
 }
 
-async function readPdfResponse(response: Response, url: string): Promise<PdfInput> {
+async function readPdfResponse(download: DownloadResponse): Promise<PdfInput> {
+  const { response, url } = download;
   if (!response.ok) throw new Error(`Download failed with HTTP ${response.status}.`);
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.includes("application/pdf")) throw new Error(`Expected application/pdf, received ${contentType || "no content type"}.`);
@@ -90,7 +95,7 @@ export async function downloadPdfForSource(input: {
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
     const strategy = strategyForSource(input.source, input.registry, input.fallback);
-    return await readPdfResponse(await strategy.fetch({ url: input.url, signal: controller.signal }), input.url);
+    return await readPdfResponse(await strategy.fetch({ url: input.url, signal: controller.signal }));
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") throw new Error("Download timed out after 30 seconds.");
     throw error;

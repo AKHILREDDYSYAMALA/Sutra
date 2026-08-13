@@ -55,6 +55,12 @@ schedule `next_attempt_at` using exponential backoff. `claimNextDocument` locks
 one due row with `FOR UPDATE SKIP LOCKED`, increments its attempt counter, and
 sets a short lease in `next_attempt_at`.
 
+For an intentional one-time retry after fixing a source bug, run
+`npm run worker -- --retry-failed --max <count>`. It moves explicitly terminal
+`failed` rows back to `discovered` before claiming work and logs the count by
+source. Use it deliberately: normal retries stay in `discovered` and need no
+manual reopening.
+
 ## Ledger rule
 
 Claims are append-only. A correction is a new claim. Supersession inserts the

@@ -30,6 +30,7 @@ export type BseClientOptions = {
 };
 
 type BseRequestOptions = Pick<RequestInit, "signal" | "redirect">;
+export type BseAttachmentDownload = { response: Response; url: string };
 
 export class BseRequestError extends Error {
   readonly status: number | null;
@@ -48,6 +49,14 @@ export class BseBlockedError extends BseRequestError {
   constructor(status: 403 | 429) {
     super(`BSE returned HTTP ${status}; source must remain disabled.`, { status });
     this.name = "BseBlockedError";
+  }
+}
+
+/** Both published BSE attachment locations were checked and the file is absent. */
+export class BseAttachmentNotFoundError extends BseRequestError {
+  constructor(readonly attemptedUrls: readonly string[]) {
+    super(`BSE attachment was not found at ${attemptedUrls.join(" or ")}.`, { status: 404, attempts: attemptedUrls.length });
+    this.name = "BseAttachmentNotFoundError";
   }
 }
 
@@ -92,7 +101,25 @@ function attachmentUrl(raw: Record<string, unknown>) {
   if (!value) return null;
   if (/^https?:\/\//i.test(value)) return value;
   if (value.startsWith("/")) return new URL(value, BSE_SITE).toString();
+  if (/^(?:xml-data\/corpfiling\/)?Attach(?:Live|His)\//i.test(value)) {
+    return new URL(`/xml-data/corpfiling/${value.replace(/^xml-data\/corpfiling\//i, "")}`, BSE_SITE).toString();
+  }
   return new URL(`/xml-data/corpfiling/AttachLive/${value}`, BSE_SITE).toString();
+}
+
+/** Alternate only the known BSE publication folders; never synthesize another URL. */
+export function alternateBseAttachmentUrl(url: string) {
+  const parsed = new URL(url);
+  if (!/(?:^|\.)bseindia\.com$/i.test(parsed.hostname)) return null;
+  if (parsed.pathname.includes("/xml-data/corpfiling/AttachLive/")) {
+    parsed.pathname = parsed.pathname.replace("/xml-data/corpfiling/AttachLive/", "/xml-data/corpfiling/AttachHis/");
+    return parsed.toString();
+  }
+  if (parsed.pathname.includes("/xml-data/corpfiling/AttachHis/")) {
+    parsed.pathname = parsed.pathname.replace("/xml-data/corpfiling/AttachHis/", "/xml-data/corpfiling/AttachLive/");
+    return parsed.toString();
+  }
+  return null;
 }
 
 /** The single payload boundary: unknown BSE JSON becomes a typed internal announcement here. */
@@ -180,6 +207,22 @@ export class BseClient {
    * here; ingestion only decides which source strategy to use.
    */
   async downloadAttachment(url: string, options: BseRequestOptions = {}): Promise<Response> {
+    return (await this.downloadAttachmentWithPath(url, options)).response;
+  }
+
+  async downloadAttachmentWithPath(url: string, options: BseRequestOptions = {}): Promise<BseAttachmentDownload> {
+    const attemptedUrls = [url];
+    const response = await this.downloadAttachmentAtPathWithFreshSession(url, options);
+    if (response) return { response, url };
+    const alternateUrl = alternateBseAttachmentUrl(url);
+    if (!alternateUrl) throw new BseAttachmentNotFoundError(attemptedUrls);
+    attemptedUrls.push(alternateUrl);
+    const alternateResponse = await this.downloadAttachmentAtPathWithFreshSession(alternateUrl, options);
+    if (alternateResponse) return { response: alternateResponse, url: alternateUrl };
+    throw new BseAttachmentNotFoundError(attemptedUrls);
+  }
+
+  private async downloadAttachmentAtPathWithFreshSession(url: string, options: BseRequestOptions) {
     const hadSession = this.sessionEstablished;
     try {
       return await this.downloadAttachmentWithSession(url, options);
@@ -296,10 +339,13 @@ export class BseClient {
     });
   }
 
-  private async downloadAttachmentWithSession(url: string, options: BseRequestOptions) {
+  private async downloadAttachmentWithSession(url: string, options: BseRequestOptions): Promise<Response | undefined> {
     return this.withRetries("BSE attachment download", async () => {
       await this.establishSession(options);
       const response = await this.send(url, this.attachmentHeaders(), options);
+      // A filename can be moved between these two documented BSE folders. A
+      // 404 is not transient, so do not burn retries before trying the other.
+      if (response.status === 404) return undefined;
       if (response.status !== 200) throw this.errorForStatus("BSE attachment download", response.status);
       return response;
     });

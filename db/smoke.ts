@@ -16,7 +16,7 @@ import {
   watchlists,
 } from "./schema";
 import { requiredDirectUrl } from "./env";
-import { BseBlockedError } from "../lib/acquisition/bse/client";
+import { BseAttachmentNotFoundError, BseBlockedError } from "../lib/acquisition/bse/client";
 import { createDatabaseClient, type DatabaseClient } from "../lib/db/client";
 import { ingestDocument } from "../lib/ingestion/ingest";
 import { quoteHashFor } from "../lib/ingestion/claim-reconciliation";
@@ -455,6 +455,43 @@ async function smoke() {
       const [bseState] = await tx.select().from(watcherState).where(eq(watcherState.source, "bse"));
       assert.ok(bseState?.disabledUntil && bseState.disabledUntil.getTime() > Date.now() + 23 * 60 * 60 * 1_000);
       assert.match(bseState?.lastError ?? "", /HTTP 403/);
+      await tx.update(watcherState).set({ disabledUntil: null }).where(eq(watcherState.source, "bse"));
+
+      const [missingBseDocument] = await tx
+        .insert(documents)
+        .values({
+          companyId: company.id,
+          source: "bse",
+          url: "https://www.bseindia.com/xml-data/corpfiling/AttachLive/missing.pdf",
+          sha256: "e".repeat(64),
+          status: "discovered",
+          attempts: 1,
+        })
+        .returning();
+      assert.ok(missingBseDocument);
+      const bseMissingDownload: DownloadStrategy = {
+        id: "bse",
+        fetch: async () => {
+          throw new BseAttachmentNotFoundError([
+            "https://www.bseindia.com/xml-data/corpfiling/AttachLive/missing.pdf",
+            "https://www.bseindia.com/xml-data/corpfiling/AttachHis/missing.pdf",
+          ]);
+        },
+      };
+      await assert.rejects(
+        ingestDocument({
+          db: tx as unknown as DatabaseClient,
+          existingDocumentId: missingBseDocument.id,
+          source: "bse",
+          url: missingBseDocument.url!,
+          services: { downloadStrategies: new Map([["bse", bseMissingDownload]]) },
+        }),
+        BseAttachmentNotFoundError,
+      );
+      const [failedBseDocument] = await tx.select().from(documents).where(eq(documents.id, missingBseDocument.id));
+      assert.equal(failedBseDocument?.status, "failed");
+      assert.equal(failedBseDocument?.nextAttemptAt, null);
+      assert.match(failedBseDocument?.lastError ?? "", /AttachLive\/missing\.pdf or .*AttachHis\/missing\.pdf/);
 
       await expectConstraint("claim substance update", () =>
         tx.transaction(async (savepoint) => {

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import fixtures from "./fixtures/announcements.json";
-import { BseBlockedError, BseClient, parseAnnouncement } from "./client";
+import { alternateBseAttachmentUrl, BseBlockedError, BseClient, parseAnnouncement } from "./client";
 import { bseCompanyNameMatches, isRatingAnnouncement } from "./watcher";
 
 test("parseAnnouncement maps saved BSE announcement payloads", () => {
@@ -13,6 +13,14 @@ test("parseAnnouncement maps saved BSE announcement payloads", () => {
     { bseAnnouncementId: "202607290003", scripCode: "500000", headline: "Company update", attachmentUrl: null },
   ]);
   assert.equal(parsed[0]?.announcementDate.getTime(), new Date("2023-10-20T23:44:22.95").getTime());
+});
+
+test("parseAnnouncement preserves an attachment path supplied by BSE", () => {
+  const parsed = parseAnnouncement({
+    NEWSID: "historical-fixture", SCRIP_CD: "532500", SLONGNAME: "Fixture Limited", NEWSSUB: "Credit rating",
+    DissemDT: "2026-01-01T00:00:00+05:30", ATTACHMENTURL: "/xml-data/corpfiling/AttachHis/historical-fixture.pdf",
+  });
+  assert.equal(parsed.attachmentUrl, "https://www.bseindia.com/xml-data/corpfiling/AttachHis/historical-fixture.pdf");
 });
 
 test("rating relevance is conservative and keeps non-rating announcements auditable", () => {
@@ -90,6 +98,25 @@ test("BSE attachment downloads reuse the BSE session, headers, and request budge
   assert.equal(attachmentHeaders?.get("referer"), "https://www.bseindia.com/corporates/ann.html");
   assert.equal(attachmentHeaders?.get("cookie"), "bse_session=download123");
   assert.equal(attachmentHeaders?.get("sec-fetch-site"), "same-origin");
+});
+
+test("BSE attachment download tries AttachHis once after an AttachLive 404", async () => {
+  const requestedUrls: string[] = [];
+  const client = new BseClient({
+    fetch: async (input) => {
+      requestedUrls.push(String(input));
+      if (requestedUrls.length === 1) return new Response("");
+      if (requestedUrls.length === 2) return new Response("missing", { status: 404 });
+      return new Response("%PDF-historical", { headers: { "content-type": "application/pdf" } });
+    },
+  });
+  const live = "https://www.bseindia.com/xml-data/corpfiling/AttachLive/fixture.pdf";
+  const download = await client.downloadAttachmentWithPath(live);
+
+  assert.equal(download.url, "https://www.bseindia.com/xml-data/corpfiling/AttachHis/fixture.pdf");
+  assert.equal(download.response.status, 200);
+  assert.equal(client.requestsMade, 3, "one bootstrap plus exactly one request per attachment path");
+  assert.deepEqual(requestedUrls.slice(1), [live, alternateBseAttachmentUrl(live)]);
 });
 
 test("BSE stops immediately instead of retrying a block response", async () => {
