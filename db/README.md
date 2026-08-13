@@ -56,10 +56,20 @@ one due row with `FOR UPDATE SKIP LOCKED`, increments its attempt counter, and
 sets a short lease in `next_attempt_at`.
 
 For an intentional one-time retry after fixing a source bug, run
-`npm run worker -- --retry-failed --max <count>`. It moves explicitly terminal
-`failed` rows back to `discovered` before claiming work and logs the count by
-source. Use it deliberately: normal retries stay in `discovered` and need no
-manual reopening.
+`npm run worker -- --retry-failed --max <count>`. It resets `attempts` and
+`next_attempt_at` for `discovered` and terminal `failed` rows, reopening the
+latter as `discovered` before claiming work and logging the count by source.
+Use it deliberately: normal retries stay in `discovered` and need no manual
+reopening.
+
+The worker logs a queue heartbeat at startup-idle and every five minutes after
+that, including pending document count and the next due attempt. A document
+processing error is logged with its document id and persisted using the same
+exponential backoff as other retryable work; socket errors such as
+`ECONNRESET`, `ETIMEDOUT`, `ENOTFOUND`, and socket hang-ups are retryable.
+An intentional hard 404 remains terminal. Process-level unhandled errors are
+logged and tolerated, but five in 60 seconds opens the worker's safety circuit
+and exits so a crash loop remains visible.
 
 ## Ledger rule
 

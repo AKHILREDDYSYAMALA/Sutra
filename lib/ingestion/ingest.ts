@@ -17,7 +17,7 @@ import { extractionTelemetry, storedExtractionTelemetry, type ExtractionTelemetr
 import { mergeRejectedQuoteDiagnostics, type RejectedQuoteDiagnostic } from "./quote-mismatches";
 import { rawRelationshipPhraseFromQuote } from "./relationship-phrases";
 import { isMalformedDualTargetEdge, resolveGraphEntities, relationTypeFor } from "./resolve-entities";
-import { assertPdfInput, downloadPdfForSource, type DownloadStrategyRegistry, type PdfInput } from "./download-strategies";
+import { assertPdfInput, DownloadHttpError, downloadPdfForSource, type DownloadStrategyRegistry, type PdfInput } from "./download-strategies";
 import { downloadDocumentPdf, uploadDocumentPdf } from "./storage";
 
 export type IngestSource = "bse" | "nse" | "crisil" | "icra" | "care" | "india_ratings" | "user_upload" | "manual";
@@ -83,11 +83,11 @@ async function scheduleDownloadFailure(input: {
   if (!input.ingestion.existingDocumentId) return;
   const message = input.error instanceof Error ? input.error.message : String(input.error);
   let notBefore: Date | undefined;
+  if (input.error instanceof BseAttachmentNotFoundError || (input.error instanceof DownloadHttpError && input.error.status === 404)) {
+    await markDocumentFailed(input.db, input.ingestion.existingDocumentId, message.slice(0, 2_000));
+    return;
+  }
   if (input.ingestion.source === "bse") {
-    if (input.error instanceof BseAttachmentNotFoundError) {
-      await markDocumentFailed(input.db, input.ingestion.existingDocumentId, message.slice(0, 2_000));
-      return;
-    }
     if (input.error instanceof BseBlockedError) {
       const state = await getBseWatcherState(input.db);
       const status = input.error.status;

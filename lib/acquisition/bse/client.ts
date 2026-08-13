@@ -36,8 +36,8 @@ export class BseRequestError extends Error {
   readonly status: number | null;
   readonly attempts: number;
 
-  constructor(message: string, input: { status?: number | null; attempts?: number } = {}) {
-    super(message);
+  constructor(message: string, input: { status?: number | null; attempts?: number; cause?: unknown } = {}) {
+    super(message, { cause: input.cause });
     this.name = "BseRequestError";
     this.status = input.status ?? null;
     this.attempts = input.attempts ?? 1;
@@ -329,7 +329,7 @@ export class BseClient {
         return await request();
       } catch (error) {
         if (error instanceof BseBlockedError || error instanceof BseRequestLimitError) throw error;
-        lastError = error instanceof BseRequestError ? error : new BseRequestError(String(error));
+        lastError = error instanceof BseRequestError ? error : new BseRequestError(String(error), { cause: error });
         if (attempt < this.maxAttempts) await delay(Math.min(30_000, 1_000 * 2 ** (attempt - 1)));
       }
     }

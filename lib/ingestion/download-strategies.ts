@@ -16,6 +16,14 @@ export type DownloadStrategy = {
 
 export type DownloadStrategyRegistry = ReadonlyMap<DownloadSource, DownloadStrategy>;
 
+/** A permanent HTTP response from a document host, distinct from a socket failure. */
+export class DownloadHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Download failed with HTTP ${status}.`);
+    this.name = "DownloadHttpError";
+  }
+}
+
 function assertPdf(bytes: Buffer) {
   if (bytes.length === 0 || bytes.length > MAX_FILE_BYTES) throw new Error("PDF must be non-empty and no larger than 10MB.");
   if (!bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) throw new Error("The source is not a PDF.");
@@ -57,7 +65,7 @@ export function strategyForSource(
 
 async function readPdfResponse(download: DownloadResponse): Promise<PdfInput> {
   const { response, url } = download;
-  if (!response.ok) throw new Error(`Download failed with HTTP ${response.status}.`);
+  if (!response.ok) throw new DownloadHttpError(response.status);
   const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
   if (!contentType.includes("application/pdf")) throw new Error(`Expected application/pdf, received ${contentType || "no content type"}.`);
   const contentLength = response.headers.get("content-length");
